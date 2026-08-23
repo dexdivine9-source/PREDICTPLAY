@@ -1,0 +1,70 @@
+{
+  "collections": [
+    {
+      "name": "users",
+      "description": "Authenticated users",
+      "fields": [
+        { "name": "uid", "type": "string", "description": "Firebase Auth UID" },
+        { "name": "email", "type": "string", "description": "User email address" },
+        { "name": "createdAt", "type": "timestamp", "description": "Creation timestamp" }
+      ],
+      "rules": [
+        { "action": "read", "condition": "request.auth != null" },
+        { "action": "create", "condition": "request.auth != null && request.auth.uid == request.resource.data.uid" },
+        { "action": "update", "condition": "request.auth != null && request.auth.uid == resource.data.uid" },
+        { "action": "delete", "condition": "false" }
+      ]
+    },
+    {
+      "name": "player_profiles",
+      "description": "Public profiles for players",
+      "fields": [
+        { "name": "userId", "type": "string", "description": "Linked User UID" },
+        { "name": "username", "type": "string", "description": "Display username" },
+        { "name": "reputation", "type": "number", "description": "Reputation score" },
+        { "name": "createdAt", "type": "timestamp", "description": "Creation timestamp" }
+      ],
+      "rules": [
+        { "action": "read", "condition": "true" },
+        { "action": "create", "condition": "request.auth != null && request.resource.data.userId == request.auth.uid" },
+        { "action": "update", "condition": "request.auth != null && request.auth.uid == resource.data.userId" },
+        { "action": "delete", "condition": "false" }
+      ]
+    },
+    {
+      "name": "matches",
+      "description": "Match lobby and game states",
+      "fields": [
+        { "name": "creatorId", "type": "string", "description": "Creator UID" },
+        { "name": "game", "type": "string", "description": "Game type (e.g. DLS, eFootball)" },
+        { "name": "stake", "type": "number", "description": "Points stake" },
+        { "name": "state", "type": "string", "description": "Match state: OPEN, PLAYER_JOINED, READY, IN_PROGRESS, COMPLETED" },
+        { "name": "player1Id", "type": "string", "description": "UID of player 1 (creator)" },
+        { "name": "player2Id", "type": "string", "description": "UID of player 2 (joiner)" },
+        { "name": "createdAt", "type": "timestamp", "description": "Creation timestamp" }
+      ],
+      "rules": [
+        { "action": "read", "condition": "true" },
+        { "action": "create", "condition": "request.auth != null && request.resource.data.creatorId == request.auth.uid && request.resource.data.state == 'OPEN' && request.resource.data.player1Id == request.auth.uid && (!('player2Id' in request.resource.data) || request.resource.data.player2Id == null)" },
+        { "action": "update", "condition": "request.auth != null && ((resource.data.state == 'OPEN' && request.resource.data.state == 'PLAYER_JOINED' && request.resource.data.player2Id == request.auth.uid && resource.data.creatorId != request.auth.uid) || (resource.data.creatorId == request.auth.uid && resource.data.state != 'COMPLETED') || (resource.data.player2Id == request.auth.uid && resource.data.state != 'COMPLETED'))" },
+        { "action": "delete", "condition": "false" }
+      ]
+    },
+    {
+      "name": "match_participants",
+      "description": "Tracks who is participating in a match",
+      "fields": [
+        { "name": "matchId", "type": "string" },
+        { "name": "userId", "type": "string" },
+        { "name": "role", "type": "string", "description": "CREATOR or JOINER" },
+        { "name": "joinedAt", "type": "timestamp" }
+      ],
+      "rules": [
+        { "action": "read", "condition": "true" },
+        { "action": "create", "condition": "request.auth != null && request.resource.data.userId == request.auth.uid" },
+        { "action": "update", "condition": "false" },
+        { "action": "delete", "condition": "false" }
+      ]
+    }
+  ]
+}

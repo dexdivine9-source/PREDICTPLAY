@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-pp-bg: #050a15;
+  --color-pp-surface: #0a1122;
+  --color-pp-surface-hover: #121d36;
+  --color-pp-border: #1e293b;
+  --color-pp-primary: #39ff14;
+  --color-pp-primary-dark: #2bc00f;
+  --color-pp-secondary: #9d00ff;
+  --color-pp-accent: #00f0ff;
+  --color-pp-text: #f8fafc;
+  --color-pp-text-muted: #94a3b8;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-pp-bg);
+    color: var(--color-pp-text);
+  }
+}
