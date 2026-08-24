@@ -121,9 +121,7 @@ export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload
 
     transaction.update(evidenceRef, {
       analysisStatus: "COMPLETE",
-      aiPayload: mockAiPayload,
-      imageHash: "mock-sha256-hash-" + Date.now(), 
-      perceptualHash: "mock-phash-" + Date.now() 
+      aiPayload: mockAiPayload
     });
   });
 }

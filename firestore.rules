@@ -73,19 +73,23 @@ service cloud.firestore {
     }
 
     match /virtual_wallets/{walletId} {
-      allow read: if true;
+      // Personal balance — only the owner (wallet doc id == uid) can read.
+      allow read: if isSignedIn() && request.auth.uid == walletId;
       allow write: if false;
     }
     match /markets/{marketId} {
+      // Aggregate pool data, non-personal — public read is intentional.
       allow read: if true;
       allow write: if false;
     }
     match /predictions/{predId} {
-      allow read: if true;
+      // Personal bet records — only the owner can read.
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
     match /transactions/{txId} {
-      allow read: if true;
+      // Personal ledger — only the owner can read.
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
   }

@@ -10,6 +10,11 @@ export async function createWalletAction() {
   const userId = user.uid;
 
   const walletRef = adminDb.collection("virtual_wallets").doc(userId);
+  const existing = await walletRef.get();
+  if (existing.exists) {
+    // Wallet already exists — do not overwrite to prevent balance-reset exploit.
+    return;
+  }
   await walletRef.set({
     userId,
     balance: 1000,

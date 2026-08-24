@@ -41,7 +41,7 @@ export default function LoginPage() {
           </button>
         </form>
         <div className="mt-4 text-center">
-          <Link href="/register" className="text-pp-primary hover:underline">Don't have an account? Register</Link>
+          <Link href="/register" className="text-pp-primary hover:underline">Don&apos;t have an account? Register</Link>
         </div>
       </div>
     </div>
