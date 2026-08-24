@@ -3,9 +3,11 @@
 import { adminDb } from "@/lib/firebase-admin";
 import * as FirebaseFirestore from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
+import { getAuthUser } from "@/lib/auth-server";
 
-export async function createWalletAction(userId: string) {
-  if (!userId) throw new Error("Missing userId");
+export async function createWalletAction() {
+  const user = await getAuthUser();
+  const userId = user.uid;
 
   const walletRef = adminDb.collection("virtual_wallets").doc(userId);
   await walletRef.set({
@@ -16,7 +18,15 @@ export async function createWalletAction(userId: string) {
 }
 
 export async function createMarketAction(matchId: string) {
-  if (!matchId) throw new Error("Missing matchId");
+  const user = await getAuthUser();
+  // Any authenticated user can create a market for their match if it doesn't exist.
+  // We should verify they are a participant.
+  const matchRef = adminDb.collection("matches").doc(matchId);
+  const matchDoc = await matchRef.get();
+  if (!matchDoc.exists) throw new Error("Match not found");
+  if (matchDoc.data()!.creatorId !== user.uid && matchDoc.data()!.player2Id !== user.uid) {
+    throw new Error("Unauthorized");
+  }
 
   const marketRef = adminDb.collection("markets").doc(matchId);
   await marketRef.set({
@@ -30,8 +40,11 @@ export async function createMarketAction(matchId: string) {
   });
 }
 
-export async function placePredictionAction(userId: string, matchId: string, outcome: "p1" | "p2" | "draw", amount: number) {
-  if (!userId || !matchId || !outcome || amount <= 0) {
+export async function placePredictionAction(matchId: string, outcome: "p1" | "p2" | "draw", amount: number) {
+  const user = await getAuthUser();
+  const userId = user.uid;
+
+  if (!matchId || !outcome || amount <= 0) {
     throw new Error("Invalid prediction data");
   }
 
@@ -47,6 +60,7 @@ export async function placePredictionAction(userId: string, matchId: string, out
     if (!walletSnap.exists || walletSnap.data()!.balance < amount) {
       throw new Error("Insufficient virtual points.");
     }
+
     if (!marketSnap.exists || marketSnap.data()!.status !== "OPEN") {
       throw new Error("Market is not open.");
     }
@@ -64,6 +78,7 @@ export async function placePredictionAction(userId: string, matchId: string, out
     if (outcome === "p1") poolUpdates.p1Pool = marketData.p1Pool + amount;
     if (outcome === "p2") poolUpdates.p2Pool = marketData.p2Pool + amount;
     if (outcome === "draw") poolUpdates.drawPool = marketData.drawPool + amount;
+    
     transaction.update(marketRef, poolUpdates);
 
     // Record Transaction
@@ -89,7 +104,10 @@ export async function placePredictionAction(userId: string, matchId: string, out
   });
 }
 
-export async function submitMatchResultAction(matchId: string, userId: string, reportedScore1: number, reportedScore2: number, isCreator: boolean, evidenceUrl: string) {
+export async function submitMatchResultAction(matchId: string, reportedScore1: number, reportedScore2: number, evidenceUrl: string) {
+  const user = await getAuthUser();
+  const userId = user.uid;
+
   await adminDb.runTransaction(async (transaction: FirebaseFirestore.Transaction) => {
     const matchRef = adminDb.collection("matches").doc(matchId);
     const matchDoc = await transaction.get(matchRef);
@@ -100,6 +118,12 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
     if (data.state === "COMPLETED" || data.state === "MANUAL_REVIEW") {
       throw new Error("Match is already resolved or in manual review.");
     }
+
+    // Determine role based on actual match data
+    if (data.player1Id !== userId && data.player2Id !== userId) {
+      throw new Error("Unauthorized: You are not a participant.");
+    }
+    const isCreator = data.player1Id === userId;
     
     const updateData: any = {};
     
@@ -124,6 +148,7 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
     if (isP1NowSubmitted && isP2NowSubmitted) {
       const p1Final1 = isCreator ? reportedScore1 : data.p1Score1;
       const p1Final2 = isCreator ? reportedScore2 : data.p1Score2;
+      
       const p2Final1 = !isCreator ? reportedScore1 : data.p2Score1;
       const p2Final2 = !isCreator ? reportedScore2 : data.p2Score2;
 
@@ -131,8 +156,8 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
         updateData.state = "COMPLETED";
         updateData.finalScore1 = p1Final1;
         updateData.finalScore2 = p1Final2;
-
         resolveState = "COMPLETED";
+        
         if (p1Final1 > p1Final2) winningOutcome = "p1";
         else if (p1Final2 > p1Final1) winningOutcome = "p2";
         else winningOutcome = "draw";
@@ -149,7 +174,6 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
         if (p1Snap.exists && p2Snap.exists) {
            let p1RepChange = 0;
            let p2RepChange = 0;
-
            if (winningOutcome === "p1") {
              p1RepChange = 25; p2RepChange = -20;
            } else if (winningOutcome === "p2") {
@@ -157,10 +181,10 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
            } else {
              p1RepChange = 5; p2RepChange = 5;
            }
-
            transaction.update(p1ProfileRef, { reputation: (p1Snap.data()!.reputation || 100) + p1RepChange });
            transaction.update(p2ProfileRef, { reputation: (p2Snap.data()!.reputation || 100) + p2RepChange });
         }
+
       } else {
         updateData.state = "DISPUTED";
         resolveState = "DISPUTED";
@@ -169,7 +193,6 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
     
     transaction.update(matchRef, updateData);
 
-    // If fully submitted and resolved, trigger market settlement/locking
     if (resolveState === "COMPLETED" && winningOutcome) {
       await settleMarket(transaction, matchId, winningOutcome);
     } else if (resolveState === "DISPUTED") {
@@ -195,7 +218,7 @@ export async function settleMarket(transaction: FirebaseFirestore.Transaction, m
   const nonWinningPool = marketData.totalPool - winningPool;
 
   const predictionsSnapshot = await adminDb.collection("predictions").where("marketId", "==", matchId).get();
-
+  
   const settlementId = adminDb.collection("settlements").doc().id;
 
   for (const predDoc of predictionsSnapshot.docs) {
@@ -203,7 +226,6 @@ export async function settleMarket(transaction: FirebaseFirestore.Transaction, m
     const predRef = predDoc.ref;
 
     if (predData.outcome === winningOutcome) {
-      // Calculate payout
       let payout = predData.amount;
       if (winningPool > 0) {
         const share = predData.amount / winningPool;

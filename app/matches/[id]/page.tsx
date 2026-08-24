@@ -40,7 +40,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
 
     try {
       const { placePredictionAction } = await import("@/app/actions");
-      await placePredictionAction(user.uid, matchId, predictOutcome, amountNum);
+      await placePredictionAction(matchId, predictOutcome, amountNum);
       
       await refreshProfile();
       setPredictAmount("");

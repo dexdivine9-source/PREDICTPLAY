@@ -24,7 +24,7 @@ export default function ProfileCreatePage() {
         createdAt: serverTimestamp()
       });
 
-      await createWalletAction(user.uid);
+      await createWalletAction();
 
       await refreshProfile();
       router.push("/");

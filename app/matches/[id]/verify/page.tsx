@@ -72,7 +72,7 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
 
     try {
       const { submitMatchResultAction } = await import("@/app/actions");
-      await submitMatchResultAction(matchId, user.uid, reportedScore1, reportedScore2, isCreator, evidenceUrl);
+      await submitMatchResultAction(matchId, reportedScore1, reportedScore2, evidenceUrl);
       
     } catch (err: any) {
       setError(err.message);

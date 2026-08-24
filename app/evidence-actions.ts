@@ -4,15 +4,18 @@ import { adminDb } from "@/lib/firebase-admin";
 import * as FirebaseFirestore from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { EvidencePhase } from "@/lib/types";
+import { getAuthUser } from "@/lib/auth-server";
+import { settleMarket } from "./actions"; 
 
-// This is called by the client AFTER they successfully upload to Firebase Storage
 export async function registerEvidenceAction(
-  userId: string,
   matchId: string,
   phase: EvidencePhase,
   storagePath: string
 ) {
-  if (!userId || !matchId || !phase || !storagePath) {
+  const user = await getAuthUser();
+  const userId = user.uid;
+
+  if (!matchId || !phase || !storagePath) {
     throw new Error("Missing required evidence fields");
   }
 
@@ -33,7 +36,6 @@ export async function registerEvidenceAction(
   await adminDb.runTransaction(async (transaction) => {
     const sessionDoc = await transaction.get(sessionRef);
     if (!sessionDoc.exists) {
-      // Create session if it doesn't exist
       transaction.set(sessionRef, {
         matchId,
         game: matchData.game,
@@ -86,18 +88,20 @@ export async function registerEvidenceAction(
   });
 }
 
-// --- AI ABSTRACTION ---
-// In a real production environment, this would call Gemini Vision.
-// For the MVP, we will abstract this and return a simulated structured JSON.
 export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload?: any) {
+  // Normally called by internal backend processes or Cloud Tasks, NOT by clients directly.
+  // But if called by client, we MUST verify admin. For MVP, we'll just verify auth.
+  const user = await getAuthUser();
+  if (!user.admin) {
+    throw new Error("Unauthorized: Only admins or system processes can analyze evidence directly");
+  }
+
   const evidenceRef = adminDb.collection("match_evidence").doc(evidenceId);
   
   await adminDb.runTransaction(async (transaction) => {
     const doc = await transaction.get(evidenceRef);
     if (!doc.exists) throw new Error("Evidence not found");
     
-    // Simulate AI extraction delay
-    // In production, we'd fetch the image from Firebase Storage and pass to Gemini.
     const mockAiPayload = simulatedPayload || {
       game: "DLS", 
       gameConfidence: 0.98,
@@ -118,14 +122,20 @@ export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload
     transaction.update(evidenceRef, {
       analysisStatus: "COMPLETE",
       aiPayload: mockAiPayload,
-      imageHash: "mock-sha256-hash-" + Date.now(), // Simulated
-      perceptualHash: "mock-phash-" + Date.now() // Simulated
+      imageHash: "mock-sha256-hash-" + Date.now(), 
+      perceptualHash: "mock-phash-" + Date.now() 
     });
   });
 }
 
-// --- DETERMINISTIC VERIFICATION ENGINE ---
 export async function verifyMatchAction(matchId: string) {
+  const user = await getAuthUser();
+  // We can let any auth user trigger the deterministic engine, it relies only on trusted AI payload, not client data.
+  // But ideally, only admin or system process triggers this. We will enforce admin claim.
+  if (!user.admin) {
+     throw new Error("Unauthorized");
+  }
+
   const matchRef = adminDb.collection("matches").doc(matchId);
   
   await adminDb.runTransaction(async (transaction) => {
@@ -137,13 +147,11 @@ export async function verifyMatchAction(matchId: string) {
       throw new Error("Match is already resolved");
     }
 
-    // Fetch all evidence for this match
     const evidenceSnap = await transaction.get(
       adminDb.collection("match_evidence").where("matchId", "==", matchId)
     );
     
-    // Group evidence by active (latest attempt)
-    const activeEvidence = new Map<string, any>(); // key: `${userId}_${phase}`
+    const activeEvidence = new Map<string, any>(); 
     
     evidenceSnap.docs.forEach(doc => {
       const data = doc.data();
@@ -158,22 +166,18 @@ export async function verifyMatchAction(matchId: string) {
     const p1End = activeEvidence.get(`${matchData.player1Id}_END`);
     const p2End = activeEvidence.get(`${matchData.player2Id}_END`);
 
-    // Check completeness
     if (!p1Start || !p2Start || !p1End || !p2End) {
       transaction.update(matchRef, { state: "MANUAL_REVIEW", resolutionReason: "Missing evidence" });
       return;
     }
 
-    // Ensure all are processed
     if (
       p1Start.analysisStatus !== "COMPLETE" || p2Start.analysisStatus !== "COMPLETE" ||
       p1End.analysisStatus !== "COMPLETE" || p2End.analysisStatus !== "COMPLETE"
     ) {
-      // Still processing
       return;
     }
 
-    // HARD CONSTRAINTS
     const p1Payload = p1End.aiPayload;
     const p2Payload = p2End.aiPayload;
 
@@ -182,10 +186,6 @@ export async function verifyMatchAction(matchId: string) {
       return;
     }
 
-    // We assume the AI returns normalized scores like { player1: 3, player2: 1 } from the perspective of the uploader.
-    // Or we assume standard absolute representation. Let's assume AI outputs absolute P1/P2 based on identity.
-    // For simplicity, we just check if the scores match identically.
-    
     const p1ScoreReport = p1Payload.score;
     const p2ScoreReport = p2Payload.score;
 
@@ -197,12 +197,10 @@ export async function verifyMatchAction(matchId: string) {
       return;
     }
 
-    // Soft confidence calculation (simplified)
     let confidence = 100;
     if (p1Payload.possibleManipulation || p2Payload.possibleManipulation) confidence -= 50;
     
     if (confidence >= 90) {
-      // AUTO VERIFY
       const p1Final1 = p1ScoreReport.player1;
       const p1Final2 = p1ScoreReport.player2;
       
@@ -222,15 +220,15 @@ export async function verifyMatchAction(matchId: string) {
       transaction.update(matchRef, { state: "MANUAL_REVIEW", resolutionReason: "Low confidence", verificationConfidence: confidence });
     }
   });
-
-  // We must trigger settlement OUTSIDE the transaction since it's a separate process,
-  // OR we can export `triggerSettlementAction` to handle the final `AUTO_VERIFIED` -> `COMPLETED` phase.
 }
 
-// --- SETTLEMENT BRIDGE ---
-import { settleMarket } from "./actions"; // Need to export settleMarket from actions.ts
-
 export async function finalizeVerifiedMatchAction(matchId: string) {
+  // Should ideally be admin only
+  const user = await getAuthUser();
+  if (!user.admin) {
+    throw new Error("Unauthorized");
+  }
+
   let winningOutcomeToSettle: string | null = null;
 
   await adminDb.runTransaction(async (transaction) => {
@@ -250,9 +248,6 @@ export async function finalizeVerifiedMatchAction(matchId: string) {
       resolvedAt: FieldValue.serverTimestamp()
     });
 
-    // We do NOT settle inside this same transaction lock if it's too large, but for atomic consistency,
-    // we can either bundle them or run sequentially. The existing `settleMarket` takes a transaction.
-    // So let's actually just call it here!
     if (winningOutcomeToSettle) {
       await settleMarket(transaction, matchId, winningOutcomeToSettle);
     }

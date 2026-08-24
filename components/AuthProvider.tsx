@@ -53,8 +53,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (user) {
+        const token = await user.getIdToken();
+        document.cookie = `auth_token=${token}; path=/; max-age=3600; Secure; SameSite=Strict`;
         await fetchProfile(user.uid);
       } else {
+        document.cookie = `auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=Strict`;
         setProfile(null);
         setWallet(null);
       }
