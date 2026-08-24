@@ -182,7 +182,7 @@ export async function submitMatchResultAction(matchId: string, userId: string, r
   });
 }
 
-async function settleMarket(transaction: FirebaseFirestore.Transaction, matchId: string, winningOutcome: string) {
+export async function settleMarket(transaction: FirebaseFirestore.Transaction, matchId: string, winningOutcome: string) {
   const marketRef = adminDb.collection("markets").doc(matchId);
   const marketDoc = await transaction.get(marketRef);
   

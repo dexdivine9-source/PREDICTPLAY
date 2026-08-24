@@ -1,59 +1,84 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    function isSignedIn() { return request.auth != null; }
+
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
-      allow update: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.uid;
+      allow update: if isSignedIn() && request.auth.uid == resource.data.uid;
       allow delete: if false;
     }
 
     match /player_profiles/{profileId} {
       allow read: if true;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if false; // Only server can update reputation securely
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if false; 
       allow delete: if false;
     }
 
     match /matches/{matchId} {
       allow read: if true;
-      allow create: if request.auth != null
+      allow create: if isSignedIn()
                     && request.resource.data.creatorId == request.auth.uid
                     && request.resource.data.state == 'OPEN'
                     && request.resource.data.player1Id == request.auth.uid
                     && (!('player2Id' in request.resource.data) || request.resource.data.player2Id == null);
       
-      allow update: if request.auth != null 
-                    && (
-                      (resource.data.state == 'OPEN' && request.resource.data.state == 'PLAYER_JOINED' && request.resource.data.player2Id == request.auth.uid && resource.data.creatorId != request.auth.uid)
-                      || (resource.data.creatorId == request.auth.uid && resource.data.state != 'COMPLETED')
-                      || (resource.data.player2Id == request.auth.uid && resource.data.state != 'COMPLETED')
-                    );
+      allow update: if isSignedIn()
+                    && resource.data.state == 'OPEN' 
+                    && request.resource.data.state == 'PLAYER_JOINED' 
+                    && request.resource.data.player2Id == request.auth.uid 
+                    && resource.data.creatorId != request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'player2Id']);
                     
       allow delete: if false;
     }
 
+    match /match_evidence_sessions/{sessionId} {
+      allow read: if isSignedIn() && (resource.data.player1Id == request.auth.uid || resource.data.player2Id == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /match_evidence/{evidenceId} {
+      // Need a get() to check if auth is opponent, but for now we'll allow if it's the user. 
+      // To strictly follow: read if user or opponent. We can look up the match.
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        get(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.player1Id == request.auth.uid ||
+        get(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.player2Id == request.auth.uid
+      );
+      allow write: if false;
+    }
+
+    match /admin_actions/{actionId} {
+      allow read: if false; // Assume admins read via Admin SDK
+      allow write: if false;
+    }
+
+    match /player_risk_events/{eventId} {
+      allow read, write: if false;
+    }
+
     match /match_participants/{participantId} {
       allow read: if true;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if false;
-      allow delete: if false;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
     }
+
     match /virtual_wallets/{walletId} {
       allow read: if true;
       allow write: if false;
     }
-
     match /markets/{marketId} {
       allow read: if true;
       allow write: if false;
     }
-
     match /predictions/{predId} {
       allow read: if true;
       allow write: if false;
     }
-
     match /transactions/{txId} {
       allow read: if true;
       allow write: if false;
