@@ -39,58 +39,8 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     setError("");
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const walletRef = doc(db, "virtual_wallets", user.uid);
-        const marketRef = doc(db, "markets", matchId);
-        
-        const [walletSnap, marketSnap] = await Promise.all([
-          transaction.get(walletRef),
-          transaction.get(marketRef)
-        ]);
-
-        if (!walletSnap.exists() || walletSnap.data().balance < amountNum) {
-          throw new Error("Insufficient virtual points.");
-        }
-        if (!marketSnap.exists() || marketSnap.data().status !== "OPEN") {
-          throw new Error("Market is not open.");
-        }
-
-        const currentBalance = walletSnap.data().balance;
-        const marketData = marketSnap.data();
-
-        // Update Wallet
-        transaction.update(walletRef, {
-          balance: currentBalance - amountNum
-        });
-
-        // Update Market Pools
-        const poolUpdates: any = { totalPool: marketData.totalPool + amountNum };
-        if (predictOutcome === "p1") poolUpdates.p1Pool = marketData.p1Pool + amountNum;
-        if (predictOutcome === "p2") poolUpdates.p2Pool = marketData.p2Pool + amountNum;
-        if (predictOutcome === "draw") poolUpdates.drawPool = marketData.drawPool + amountNum;
-        transaction.update(marketRef, poolUpdates);
-
-        // Record Transaction
-        const txRef = doc(collection(db, "transactions"));
-        transaction.set(txRef, {
-          userId: user.uid,
-          amount: -amountNum,
-          type: "PREDICTION_PLACED",
-          referenceId: matchId,
-          createdAt: serverTimestamp()
-        });
-
-        // Record Prediction
-        const predRef = doc(collection(db, "predictions"));
-        transaction.set(predRef, {
-          marketId: matchId,
-          userId: user.uid,
-          outcome: predictOutcome,
-          amount: amountNum,
-          status: "PENDING",
-          createdAt: serverTimestamp()
-        });
-      });
+      const { placePredictionAction } = await import("@/app/actions");
+      await placePredictionAction(user.uid, matchId, predictOutcome, amountNum);
       
       await refreshProfile();
       setPredictAmount("");
@@ -146,7 +96,6 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     }
     setJoinLoading(true);
     setError("");
-
     try {
       if (match.creatorId === user.uid) {
         throw new Error("You cannot join your own match.");
@@ -155,14 +104,12 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
         throw new Error("This match is no longer open.");
       }
 
-      // Update match document
       const matchRef = doc(db, "matches", matchId);
       await updateDoc(matchRef, {
         player2Id: user.uid,
         state: "PLAYER_JOINED"
       });
 
-      // Add participant record
       const participantRef = doc(db, "match_participants", `${matchId}_${user.uid}`);
       await setDoc(participantRef, {
         matchId,
@@ -171,17 +118,8 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
         joinedAt: serverTimestamp()
       });
 
-      // Create Prediction Market
-      const marketRef = doc(db, "markets", matchId);
-      await setDoc(marketRef, {
-        matchId,
-        totalPool: 0,
-        p1Pool: 0,
-        p2Pool: 0,
-        drawPool: 0,
-        status: "OPEN",
-        createdAt: serverTimestamp()
-      });
+      const { createMarketAction } = await import("@/app/actions");
+      await createMarketAction(matchId);
       
     } catch (err: any) {
       setError(err.message);

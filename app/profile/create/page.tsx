@@ -5,6 +5,7 @@ import { auth, db } from "@/lib/firebase";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { createWalletAction } from "@/app/actions";
 
 export default function ProfileCreatePage() {
   const [username, setUsername] = useState("");
@@ -23,11 +24,7 @@ export default function ProfileCreatePage() {
         createdAt: serverTimestamp()
       });
 
-      await setDoc(doc(db, "virtual_wallets", user.uid), {
-        userId: user.uid,
-        balance: 1000,
-        createdAt: serverTimestamp()
-      });
+      await createWalletAction(user.uid);
 
       await refreshProfile();
       router.push("/");
