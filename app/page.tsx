@@ -12,8 +12,7 @@ export default function Home() {
             <span className="text-pp-primary">Back The Best.</span>
           </h1>
           <p className="text-lg md:text-xl text-pp-text-muted mb-10 max-w-2xl mx-auto">
-            The verified competitive matchmaking and prediction platform for DLS & eFootball players.
-            Play matches to build reputation, or spectate verified matches.
+            The verified competitive matchmaking and prediction platform for DLS & eFootball players. Every game has a winner. Can you predict it?
           </p>
         </div>
       </section>
