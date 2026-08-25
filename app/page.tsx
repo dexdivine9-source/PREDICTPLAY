@@ -217,37 +217,6 @@ export default function Home() {
       </section>
 
 
-      {/* ========================================================================= */}
-      {/* 5. FINAL CTA */}
-      {/* ========================================================================= */}
-      <section className="py-20 lg:py-28 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto text-center relative">
-        <div className="absolute inset-0 bg-gradient-to-t from-pp-primary/10 via-transparent to-transparent rounded-3xl pointer-events-none"></div>
-
-        <div className="relative z-10 max-w-3xl mx-auto">
-          <h2 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white uppercase tracking-tight leading-tight">
-            READY TO PROVE YOUR SKILL?
-          </h2>
-          <p className="text-base sm:text-lg text-slate-300 mt-4 leading-relaxed font-medium">
-            Play verified matches. Build your reputation. Back the players you believe in.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mt-8 sm:mt-10">
-            <Link
-              href="/matches"
-              className="w-full sm:w-auto px-8 py-4 bg-pp-primary text-black font-black rounded-xl hover:bg-pp-primary-dark transition-all transform hover:scale-105 shadow-[0_0_30px_rgba(57,255,20,0.4)] text-base uppercase tracking-wider"
-            >
-              ENTER PREDICTPLAY
-            </Link>
-            <Link
-              href="/markets"
-              className="w-full sm:w-auto px-8 py-4 bg-pp-surface border border-pp-border hover:border-pp-primary/50 text-white font-bold rounded-xl hover:bg-pp-surface-hover transition-all text-base uppercase tracking-wider"
-            >
-              VIEW MARKETS
-            </Link>
-          </div>
-        </div>
-      </section>
-
 
       {/* ========================================================================= */}
       {/* 3. GRAND PRIZE WINNERS TICKER */}
