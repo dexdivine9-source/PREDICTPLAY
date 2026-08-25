@@ -15,16 +15,16 @@ export default function Navigation() {
   const { user, wallet } = useAuth();
 
   const desktopLinks = [
-    { href: "/", label: "Home", icon: Home },
-    { href: "/matches", label: "Compete", icon: Gamepad2 },
-    { href: "/markets", label: "Spectate", icon: PlaySquare },
+    { href: "/matches", label: "Matches", icon: Gamepad2 },
+    { href: "/markets", label: "Markets", icon: PlaySquare },
     { href: "/rankings", label: "Rankings", icon: Trophy },
+    { href: "/profile", label: "Players", icon: User },
   ];
 
   const mobileLinks = [
     { href: "/", label: "Home", icon: Home },
-    { href: "/matches", label: "Compete", icon: Gamepad2 },
-    { href: "/markets", label: "Spectate", icon: PlaySquare },
+    { href: "/matches", label: "Matches", icon: Gamepad2 },
+    { href: "/markets", label: "Markets", icon: PlaySquare },
     { href: "/rankings", label: "Rankings", icon: Trophy },
     { href: user ? "/profile" : "/login", label: user ? "Profile" : "Login", icon: User },
   ];
