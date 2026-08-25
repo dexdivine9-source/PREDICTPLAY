@@ -7,6 +7,11 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   Eye,
+  Flame,
+  Swords,
+  Activity,
+  ChevronRight,
+  Plus,
 } from "lucide-react";
 import ActivityFeed from "@/components/ActivityFeed";
 import GrandPrizeWinners from "@/components/GrandPrizeWinners";
@@ -90,7 +95,130 @@ export default function Home() {
 
 
       {/* ========================================================================= */}
-      {/* 2. FINAL CTA */}
+      {/* 2. TOP LIVE MATCHES */}
+      {/* ========================================================================= */}
+      <section className="px-4 sm:px-6 lg:px-8 py-8 max-w-5xl mx-auto border-b border-pp-border/60">
+        {/* Section Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+            <Flame size={16} className="text-pp-primary" />
+            <h2 className="text-sm sm:text-base font-black uppercase tracking-widest text-white">
+              TOP LIVE MATCHES
+            </h2>
+          </div>
+          <Link
+            href="/matches"
+            className="flex items-center gap-1 text-pp-primary text-xs sm:text-sm font-black uppercase tracking-wider hover:underline"
+          >
+            SPECTATE ALL <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        {/* Empty State */}
+        <div className="bg-pp-surface border border-pp-border rounded-2xl p-8 text-center">
+          <p className="text-slate-300 text-sm font-semibold">No live matches in progress right now.</p>
+          <p className="text-slate-500 text-xs mt-1">
+            Accepted challenges will immediately appear here live for spectators!
+          </p>
+        </div>
+      </section>
+
+
+      {/* ========================================================================= */}
+      {/* 3. UPCOMING MATCHES */}
+      {/* ========================================================================= */}
+      <section className="px-4 sm:px-6 lg:px-8 py-8 max-w-5xl mx-auto border-b border-pp-border/60">
+        {/* Section Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Swords size={16} className="text-pp-primary" />
+            <h2 className="text-sm sm:text-base font-black uppercase tracking-widest text-white">
+              UPCOMING MATCHES
+            </h2>
+          </div>
+          <Link
+            href="/matches"
+            className="flex items-center gap-1 text-pp-primary text-xs sm:text-sm font-black uppercase tracking-wider hover:underline"
+          >
+            VIEW ALL <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        {/* Empty State */}
+        <div className="bg-pp-surface border border-pp-border rounded-2xl p-8 text-center">
+          <p className="text-slate-400 text-sm font-medium mb-5">
+            No open challenges waiting at the moment.
+          </p>
+          <Link
+            href="/matches/create"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-pp-primary text-black font-black rounded-xl hover:bg-pp-primary-dark transition-all text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(57,255,20,0.3)]"
+          >
+            <Plus size={16} strokeWidth={3} />
+            POST FIRST CHALLENGE
+          </Link>
+        </div>
+      </section>
+
+
+      {/* ========================================================================= */}
+      {/* 4. PLATFORM ACTIVITIES */}
+      {/* ========================================================================= */}
+      <section className="px-4 sm:px-6 lg:px-8 py-8 max-w-5xl mx-auto border-b border-pp-border/60">
+        {/* Section Header */}
+        <div className="flex items-center gap-2 mb-4">
+          <Activity size={16} className="text-pp-primary" />
+          <h2 className="text-sm sm:text-base font-black uppercase tracking-widest text-white">
+            PLATFORM ACTIVITIES
+          </h2>
+        </div>
+
+        {/* Activity Items */}
+        <div className="bg-pp-surface border border-pp-border rounded-2xl overflow-hidden divide-y divide-pp-border/60">
+          {[
+            {
+              title: "Global Reputation Engine Online",
+              desc: "Fair play and automated evidence verification active.",
+              status: "ACTIVE",
+            },
+            {
+              title: "DLS Matchmaking Pool Open",
+              desc: "Create or accept 1v1 challenges instantly.",
+              status: "ACTIVE",
+            },
+            {
+              title: "eFootball Matchmaking Pool Open",
+              desc: "Verified eFootball 1v1 lobbies are open.",
+              status: "ACTIVE",
+            },
+            {
+              title: "Prediction Markets Live",
+              desc: "Back players and spectate verified results in real time.",
+              status: "ACTIVE",
+            },
+          ].map((item) => (
+            <div
+              key={item.title}
+              className="flex items-start justify-between gap-4 px-5 py-4 hover:bg-pp-surface-hover transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <span className="mt-1.5 w-2 h-2 rounded-full bg-pp-primary flex-shrink-0 shadow-[0_0_6px_rgba(57,255,20,0.6)]"></span>
+                <div>
+                  <p className="text-sm font-black text-white">{item.title}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{item.desc}</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-black text-pp-primary uppercase tracking-widest mt-1 flex-shrink-0">
+                {item.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+
+      {/* ========================================================================= */}
+      {/* 5. FINAL CTA */}
       {/* ========================================================================= */}
       <section className="py-20 lg:py-28 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto text-center relative">
         <div className="absolute inset-0 bg-gradient-to-t from-pp-primary/10 via-transparent to-transparent rounded-3xl pointer-events-none"></div>
