@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { LIVE_MATCHES, USERS, RECENT_ACTIVITY } from "@/lib/mockData";
-import { ChevronRight, Gamepad2, PlaySquare, Trophy, Activity } from "lucide-react";
+import { USERS, RECENT_ACTIVITY } from "@/lib/mockData";
+import { Gamepad2, PlaySquare, Trophy, Activity } from "lucide-react";
 
 export default function Home() {
   const topPlayers = [...USERS].sort((a, b) => a.ranking - b.ranking).slice(0, 5);
@@ -45,45 +45,28 @@ export default function Home() {
           
           {/* Main Content Column */}
           <div className="lg:col-span-2 space-y-8">
-            {/* Live Matches */}
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold flex items-center gap-2 uppercase tracking-wide">
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                  Top Live Matches
-                </h2>
-                <Link href="/markets" className="text-pp-primary text-sm font-bold hover:underline flex items-center uppercase tracking-wide">
-                  View All <ChevronRight size={16} />
-                </Link>
+            {/* Quick Actions / Matchmaking Hub */}
+            <div className="bg-pp-surface border border-pp-border rounded-xl p-8 text-center flex flex-col items-center justify-center min-h-[300px]">
+              <div className="w-16 h-16 rounded-full bg-pp-primary/10 border border-pp-primary/20 flex items-center justify-center text-pp-primary mb-4">
+                <Gamepad2 size={32} />
               </div>
-              <div className="grid grid-cols-1 gap-4">
-                {LIVE_MATCHES.map((match) => (
-                  <Link href={`/matches/${match.id}`} key={match.id} className="bg-pp-surface border border-pp-border rounded-xl p-5 hover:border-pp-primary/50 transition-colors group block">
-                    <div className="flex justify-between items-center text-sm text-pp-text-muted mb-4">
-                      <span className="font-bold text-white bg-white/10 px-2 py-0.5 rounded uppercase">{match.game}</span>
-                      <span className="text-red-500 font-bold bg-red-500/10 px-2 py-1 rounded">MATCH LIVE • {match.time}</span>
-                    </div>
-                    <div className="flex items-center justify-between mb-6 px-4">
-                      <div className="flex flex-col items-center gap-2 w-1/3">
-                        <img src={match.player1.avatar} alt={match.player1.username} className="w-16 h-16 rounded-full border-2 border-pp-bg" />
-                        <span className="font-bold text-base truncate w-full text-center text-white">{match.player1.username}</span>
-                        <span className="text-xs font-bold text-pp-primary">RATING {match.game === 'DLS' ? match.player1.dlsRating : match.player1.eFootballRating}</span>
-                      </div>
-                      <div className="text-4xl font-black font-mono tracking-tighter text-white w-1/3 text-center">
-                        {match.score1} - {match.score2}
-                      </div>
-                      <div className="flex flex-col items-center gap-2 w-1/3">
-                        <img src={match.player2.avatar} alt={match.player2.username} className="w-16 h-16 rounded-full border-2 border-pp-bg" />
-                        <span className="font-bold text-base truncate w-full text-center text-white">{match.player2.username}</span>
-                        <span className="text-xs font-bold text-pp-primary">RATING {match.game === 'DLS' ? match.player2.dlsRating : match.player2.eFootballRating}</span>
-                      </div>
-                    </div>
-                    <div className="flex justify-between items-center text-xs font-bold text-pp-text-muted bg-pp-bg p-3 rounded-lg group-hover:bg-black/50 transition-colors uppercase">
-                      <span className="flex items-center gap-1"><PlaySquare size={14}/> {match.predictionsCount.toLocaleString()} Spectators Backing</span>
-                      <span className="text-pp-accent">{match.totalPool.toLocaleString()} PTS POOL</span>
-                    </div>
-                  </Link>
-                ))}
+              <h3 className="text-2xl font-black text-white uppercase tracking-wide mb-2">Live Competitive Hub</h3>
+              <p className="text-pp-text-muted max-w-md text-sm mb-6">
+                Create a verified match, invite opponents, submit screenshot evidence, and climb the global rankings.
+              </p>
+              <div className="flex flex-wrap gap-4 justify-center">
+                <Link
+                  href="/matches/create"
+                  className="px-6 py-3 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-all flex items-center gap-2 text-sm uppercase tracking-wide"
+                >
+                  Create Match
+                </Link>
+                <Link
+                  href="/matches"
+                  className="px-6 py-3 bg-pp-bg border border-pp-border text-white font-bold rounded-lg hover:bg-pp-surface-hover transition-all flex items-center gap-2 text-sm uppercase tracking-wide"
+                >
+                  Browse Matches
+                </Link>
               </div>
             </div>
           </div>
