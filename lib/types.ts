@@ -1,22 +1,22 @@
 export type GameType = "DLS" | "eFootball";
-export type MatchState = 
-  | "OPEN" 
-  | "PLAYER_JOINED" 
-  | "AWAITING_START_EVIDENCE" 
-  | "START_EVIDENCE_PROCESSING" 
-  | "START_EVIDENCE_VERIFIED" 
-  | "READY_TO_PLAY" 
-  | "IN_PROGRESS" 
-  | "AWAITING_END_EVIDENCE" 
-  | "END_EVIDENCE_PROCESSING" 
-  | "EVIDENCE_CROSS_CHECK" 
-  | "AUTO_VERIFIED" 
-  | "MANUAL_REVIEW" 
-  | "DISPUTED" 
-  | "COMPLETED" 
+export type MatchState =
+  | "OPEN"
+  | "PLAYER_JOINED"
+  | "AWAITING_START_EVIDENCE"
+  | "START_EVIDENCE_PROCESSING"
+  | "START_EVIDENCE_VERIFIED"
+  | "READY_TO_PLAY"
+  | "IN_PROGRESS"
+  | "AWAITING_END_EVIDENCE"
+  | "END_EVIDENCE_PROCESSING"
+  | "EVIDENCE_CROSS_CHECK"
+  | "AUTO_VERIFIED"
+  | "MANUAL_REVIEW"
+  | "DISPUTED"
+  | "COMPLETED"
   | "CANCELLED";
 
-export type VerificationStatus = "PENDING" | "PROCESSING" | "VERIFIED" | "REJECTED" | "MANUAL_REVIEW";
+export type VerificationStatus = "PENDING" | "PROCESSING" | "LINKED" | "VERIFIED" | "REJECTED" | "MANUAL_REVIEW";
 export type EvidencePhase = "START" | "END" | "PROFILE";
 export type AnalysisStatus = "PENDING" | "QUEUED" | "COMPLETE" | "FAILED";
 
@@ -31,6 +31,17 @@ export interface PlayerProfile {
   lastVerificationAt?: any; // Firestore Timestamp
   createdAt?: any;
   updatedAt?: any;
+  // DLS Live tracker link (tracker.ftgames.com) — confirms the profile
+  // exists with real match history, but NOT that this account owns it.
+  // See lib/dls-tracker.ts. Status stays LINKED (not VERIFIED) until
+  // ownership is confirmed by some other means.
+  trackerId?: string;
+  trackerTeamName?: string;
+  trackerPlayed?: number;
+  trackerWon?: number;
+  trackerLost?: number;
+  trackerDivision?: number;
+  trackerLinkedAt?: any;
 }
 
 export interface Match {
@@ -41,7 +52,7 @@ export interface Match {
   game: GameType;
   stake?: number;
   state: MatchState;
-  
+
   // Reported by clients (untrusted)
   p1Score1?: number;
   p1Score2?: number;
