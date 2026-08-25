@@ -1,3 +1,5 @@
+import ActivityFeed from "@/components/ActivityFeed";
+
 export default function Home() {
   return (
     <div>
@@ -16,6 +18,9 @@ export default function Home() {
           </p>
         </div>
       </section>
+
+      {/* Live Activity Notification Feed */}
+      <ActivityFeed />
     </div>
   );
 }
