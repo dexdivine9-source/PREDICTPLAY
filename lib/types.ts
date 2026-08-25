@@ -94,6 +94,8 @@ export interface MatchEvidence {
 
   analysisStatus: AnalysisStatus;
   aiPayload?: any; // The rich JSON output
+  analysisFailureReason?: string;
+  analysisCompletedAt?: any;
   flags?: string[];
 }
 

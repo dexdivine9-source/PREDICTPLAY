@@ -4,8 +4,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 
 const projectId = process.env.FIREBASE_PROJECT_ID ?? "pharma-e-493405";
-const databaseId = "ai-studio-predictplay-f47b832e-a0f9-4c78-9648-5d8cf0dd0763";
-const storageBucket = `${projectId}.firebasestorage.app`;
+const databaseId = process.env.FIREBASE_DATABASE_ID ?? process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID ?? "ai-studio-predictplay-f47b832e-a0f9-4c78-9648-5d8cf0dd0763";
+const storageBucket = process.env.FIREBASE_STORAGE_BUCKET ?? `${projectId}.firebasestorage.app`;
 
 if (!getApps().length) {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;

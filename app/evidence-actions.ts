@@ -1,11 +1,11 @@
 "use server";
 
-import { adminDb } from "@/lib/firebase-admin";
-import * as FirebaseFirestore from "firebase-admin/firestore";
+import { adminDb, adminStorage } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { EvidencePhase } from "@/lib/types";
 import { getAuthUser } from "@/lib/auth-server";
-import { settleMarket } from "./actions"; 
+import { analyzeImageWithGemini, type AiPayload } from "@/lib/gemini-vision";
+import { settleMarket } from "./actions";
 
 export async function registerEvidenceAction(
   matchId: string,
@@ -88,42 +88,98 @@ export async function registerEvidenceAction(
   });
 }
 
-export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload?: any) {
-  // Normally called by internal backend processes or Cloud Tasks, NOT by clients directly.
-  // But if called by client, we MUST verify admin. For MVP, we'll just verify auth.
+/**
+ * Internal: runs the REAL Gemini Vision analysis for a single evidence doc.
+ *
+ * Not exported => not a client-callable server action. It is invoked by the
+ * admin-gated analyzeEvidenceAction below, and can be called by the upload
+ * pipeline directly once auto-analysis is enabled.
+ *
+ * The Storage download and the Gemini call run OUTSIDE any Firestore
+ * transaction on purpose: transactions retry on contention, and a retried
+ * model call would be billed again. We read the doc, do the slow work, then
+ * write once. Per the gemini-vision security contract, ANY failure sets
+ * analysisStatus = FAILED with a reason — there is no silent fallback to
+ * fabricated data.
+ */
+async function performEvidenceAnalysis(
+  evidenceId: string,
+  simulatedPayload?: AiPayload
+): Promise<void> {
+  const evidenceRef = adminDb.collection("match_evidence").doc(evidenceId);
+
+  const snap = await evidenceRef.get();
+  if (!snap.exists) throw new Error("Evidence not found");
+  const evidence = snap.data()!;
+
+  // Idempotent: never re-run (and re-bill) an already-completed analysis.
+  if (evidence.analysisStatus === "COMPLETE") return;
+
+  // Explicit test/replay override skips the model call entirely.
+  if (simulatedPayload) {
+    await evidenceRef.update({
+      analysisStatus: "COMPLETE",
+      aiPayload: simulatedPayload,
+      analysisCompletedAt: FieldValue.serverTimestamp(),
+    });
+    return;
+  }
+
+  const storagePath: string | undefined = evidence.storagePath;
+  if (!storagePath) {
+    await evidenceRef.update({
+      analysisStatus: "FAILED",
+      analysisFailureReason: "Evidence record has no storagePath",
+    });
+    return;
+  }
+
+  // Pull raw bytes + content type from Storage (slow I/O, outside any txn).
+  let imageBytes: Buffer;
+  let mimeType: string;
+  try {
+    const file = adminStorage.bucket().file(storagePath);
+    const [metadata] = await file.getMetadata();
+    mimeType = metadata.contentType || "image/jpeg";
+    const [bytes] = await file.download();
+    imageBytes = bytes;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await evidenceRef.update({
+      analysisStatus: "FAILED",
+      analysisFailureReason: "Could not read evidence from Storage: " + msg,
+    });
+    return;
+  }
+
+  const outcome = await analyzeImageWithGemini(imageBytes, mimeType, storagePath);
+
+  if (outcome.success) {
+    await evidenceRef.update({
+      analysisStatus: "COMPLETE",
+      aiPayload: outcome.payload,
+      imageHash: outcome.imageHash,
+      mimeType,
+      analysisCompletedAt: FieldValue.serverTimestamp(),
+    });
+  } else {
+    await evidenceRef.update({
+      analysisStatus: "FAILED",
+      analysisFailureReason: outcome.reason,
+    });
+  }
+}
+
+export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload?: AiPayload) {
+  // Admin-only manual / replay trigger. The real analysis lives in
+  // performEvidenceAnalysis; the automatic upload pipeline (once enabled)
+  // calls that helper directly, without this gate.
   const user = await getAuthUser();
   if (!user.admin) {
     throw new Error("Unauthorized: Only admins or system processes can analyze evidence directly");
   }
 
-  const evidenceRef = adminDb.collection("match_evidence").doc(evidenceId);
-  
-  await adminDb.runTransaction(async (transaction) => {
-    const doc = await transaction.get(evidenceRef);
-    if (!doc.exists) throw new Error("Evidence not found");
-    
-    const mockAiPayload = simulatedPayload || {
-      game: "DLS", 
-      gameConfidence: 0.98,
-      visiblePlayerNames: ["Player1"], 
-      playerNameConfidence: 0.9,
-      visibleOpponentNames: ["Player2"], 
-      opponentNameConfidence: 0.9,
-      score: { player1: 3, player2: 1 }, 
-      scoreConfidence: 0.97,
-      screenType: doc.data()!.phase === "END" ? "FINAL_RESULT" : "PRE_MATCH",
-      screenTypeConfidence: 0.96,
-      uiConsistency: 0.95,
-      possibleManipulation: false,
-      manipulationSignals: [],
-      notes: ["Auto-analyzed by AI abstraction layer"]
-    };
-
-    transaction.update(evidenceRef, {
-      analysisStatus: "COMPLETE",
-      aiPayload: mockAiPayload
-    });
-  });
+  await performEvidenceAnalysis(evidenceId, simulatedPayload);
 }
 
 export async function verifyMatchAction(matchId: string) {
