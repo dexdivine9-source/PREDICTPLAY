@@ -16,6 +16,7 @@ import {
 import { db } from "@/lib/firebase";
 import { collection, query, getDocs, limit } from "firebase/firestore";
 import ActivityFeed from "@/components/ActivityFeed";
+import GrandPrizeWinners from "@/components/GrandPrizeWinners";
 
 interface MatchItem {
   id: string;
@@ -322,6 +323,9 @@ export default function Home() {
             )}
           </div>
         </section>
+
+        {/* 4. GRAND PRIZE WINNERS TICKER */}
+        <GrandPrizeWinners />
 
       </div>
 
