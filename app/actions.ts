@@ -148,7 +148,6 @@ export async function submitMatchResultAction(matchId: string, reportedScore1: n
     const isP2NowSubmitted = !isCreator ? true : data.p2Submitted;
 
     let resolveState = null;
-    let winningOutcome = null;
 
     if (isP1NowSubmitted && isP2NowSubmitted) {
       const p1Final1 = isCreator ? reportedScore1 : data.p1Score1;
@@ -158,37 +157,15 @@ export async function submitMatchResultAction(matchId: string, reportedScore1: n
       const p2Final2 = !isCreator ? reportedScore2 : data.p2Score2;
 
       if (p1Final1 === p2Final1 && p1Final2 === p2Final2) {
-        updateData.state = "COMPLETED";
-        updateData.finalScore1 = p1Final1;
-        updateData.finalScore2 = p1Final2;
-        resolveState = "COMPLETED";
-        
-        if (p1Final1 > p1Final2) winningOutcome = "p1";
-        else if (p1Final2 > p1Final1) winningOutcome = "p2";
-        else winningOutcome = "draw";
-
-        // Update Reputation
-        const p1ProfileRef = adminDb.collection("player_profiles").doc(data.player1Id);
-        const p2ProfileRef = adminDb.collection("player_profiles").doc(data.player2Id);
-        
-        const [p1Snap, p2Snap] = await Promise.all([
-          transaction.get(p1ProfileRef),
-          transaction.get(p2ProfileRef)
-        ]);
-
-        if (p1Snap.exists && p2Snap.exists) {
-           let p1RepChange = 0;
-           let p2RepChange = 0;
-           if (winningOutcome === "p1") {
-             p1RepChange = 25; p2RepChange = -20;
-           } else if (winningOutcome === "p2") {
-             p1RepChange = -20; p2RepChange = 25;
-           } else {
-             p1RepChange = 5; p2RepChange = 5;
-           }
-           transaction.update(p1ProfileRef, { reputation: (p1Snap.data()!.reputation || 100) + p1RepChange });
-           transaction.update(p2ProfileRef, { reputation: (p2Snap.data()!.reputation || 100) + p2RepChange });
-        }
+        // Both players agree on a score, but this is still self-reported —
+        // no screenshot/AI verification has happened. Route to manual
+        // review rather than auto-completing and settling the market.
+        // Only verifyMatchAction (the AI-verified path) or an admin
+        // resolving this review should ever set state to COMPLETED.
+        updateData.state = "MANUAL_REVIEW";
+        updateData.reportedScore1 = p1Final1;
+        updateData.reportedScore2 = p1Final2;
+        resolveState = "MANUAL_REVIEW";
 
       } else {
         updateData.state = "DISPUTED";
@@ -198,9 +175,7 @@ export async function submitMatchResultAction(matchId: string, reportedScore1: n
     
     transaction.update(matchRef, updateData);
 
-    if (resolveState === "COMPLETED" && winningOutcome) {
-      await settleMarket(transaction, matchId, winningOutcome);
-    } else if (resolveState === "DISPUTED") {
+    if (resolveState === "DISPUTED" || resolveState === "MANUAL_REVIEW") {
       const marketRef = adminDb.collection("markets").doc(matchId);
       const marketDoc = await transaction.get(marketRef);
       if (marketDoc.exists) {

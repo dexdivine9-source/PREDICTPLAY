@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trophy, Filter, Search, ShieldCheck, Users as UsersIcon } from "lucide-react";
+import { Trophy, Search, ShieldCheck, Users as UsersIcon } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { collection, query, getDocs, limit, where } from "firebase/firestore";
+import { collection, query, getDocs, limit } from "firebase/firestore";
+import ComingSoonModal from "@/components/ComingSoonModal";
 
 interface RankedPlayer {
   id: string;
@@ -21,6 +22,7 @@ export default function RankingsPage() {
   const [selectedGame, setSelectedGame] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showComingSoon, setShowComingSoon] = useState(false);
 
   useEffect(() => {
     async function fetchRankings() {
@@ -43,7 +45,6 @@ export default function RankingsPage() {
             matchesCount: data.matchesCount ?? 0,
           });
         });
-        // Sort descending by reputation
         list.sort((a, b) => b.reputation - a.reputation);
         setPlayers(list);
       } catch (err) {
@@ -55,6 +56,14 @@ export default function RankingsPage() {
 
     fetchRankings();
   }, []);
+
+  const handleSelectGame = (game: string) => {
+    if (game === "EFOOTBALL") {
+      setShowComingSoon(true);
+      return;
+    }
+    setSelectedGame(game);
+  };
 
   const filtered = players.filter((p) => {
     const matchesGame = selectedGame === "ALL" || p.game.toUpperCase() === selectedGame.toUpperCase();
@@ -90,7 +99,7 @@ export default function RankingsPage() {
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-8">
         <button 
-          onClick={() => setSelectedGame("ALL")}
+          onClick={() => handleSelectGame("ALL")}
           className={`px-4 py-2 font-bold rounded-lg text-sm transition-colors uppercase ${
             selectedGame === "ALL" ? "bg-pp-primary text-black" : "bg-pp-surface border border-pp-border text-white hover:bg-pp-surface-hover"
           }`}
@@ -98,7 +107,7 @@ export default function RankingsPage() {
           All Games
         </button>
         <button 
-          onClick={() => setSelectedGame("DLS")}
+          onClick={() => handleSelectGame("DLS")}
           className={`px-4 py-2 font-bold rounded-lg text-sm transition-colors uppercase ${
             selectedGame === "DLS" ? "bg-pp-primary text-black" : "bg-pp-surface border border-pp-border text-white hover:bg-pp-surface-hover"
           }`}
@@ -106,12 +115,11 @@ export default function RankingsPage() {
           DLS
         </button>
         <button 
-          onClick={() => setSelectedGame("EFOOTBALL")}
-          className={`px-4 py-2 font-bold rounded-lg text-sm transition-colors uppercase ${
-            selectedGame === "EFOOTBALL" ? "bg-pp-primary text-black" : "bg-pp-surface border border-pp-border text-white hover:bg-pp-surface-hover"
-          }`}
+          onClick={() => handleSelectGame("EFOOTBALL")}
+          className="px-4 py-2 font-bold rounded-lg text-sm transition-colors uppercase bg-pp-surface border border-pp-border text-white hover:bg-pp-surface-hover flex items-center gap-1.5"
         >
           eFootball
+          <span className="text-[9px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded uppercase">Soon</span>
         </button>
       </div>
 
@@ -186,6 +194,13 @@ export default function RankingsPage() {
           </div>
         )}
       </div>
+
+      <ComingSoonModal
+        isOpen={showComingSoon}
+        onClose={() => setShowComingSoon(false)}
+        title="eFootball Rankings Coming Soon"
+        description="eFootball competitive tier leaderboards will be available once eFootball match verification goes live. Dream League Soccer rankings are live now!"
+      />
     </div>
   );
 }

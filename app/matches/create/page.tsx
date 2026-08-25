@@ -6,6 +6,7 @@ import { Copy, Check, Info } from "lucide-react";
 import { auth, db } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/components/AuthProvider";
+import ComingSoonModal from "@/components/ComingSoonModal";
 
 export default function CreateMatchPage() {
   const { user } = useAuth();
@@ -15,6 +16,7 @@ export default function CreateMatchPage() {
   const [game, setGame] = useState("dls");
   const [stake, setStake] = useState(100);
   const [error, setError] = useState("");
+  const [showComingSoon, setShowComingSoon] = useState(false);
   
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,11 +25,16 @@ export default function CreateMatchPage() {
       return;
     }
     
+    if (game === "efootball") {
+      setShowComingSoon(true);
+      return;
+    }
+
     try {
       const docRef = await addDoc(collection(db, "matches"), {
         creatorId: user.uid,
         player1Id: user.uid,
-        game,
+        game: "DLS",
         stake: Number(stake),
         state: "OPEN",
         createdAt: serverTimestamp()
@@ -103,16 +110,20 @@ export default function CreateMatchPage() {
               <input type="radio" name="game" value="dls" checked={game === "dls"} onChange={(e) => setGame(e.target.value)} className="peer sr-only" />
               <div className="p-4 bg-pp-bg border border-pp-border rounded-lg text-center peer-checked:border-pp-primary peer-checked:bg-pp-primary/5 transition-all">
                 <span className="font-bold block text-white">Dream League Soccer</span>
+                <span className="text-[10px] text-pp-primary font-bold uppercase mt-1 inline-block">Active</span>
               </div>
               <div className="absolute top-2 right-2 w-3 h-3 rounded-full bg-pp-primary opacity-0 peer-checked:opacity-100 transition-opacity"></div>
             </label>
-            <label className="cursor-pointer relative">
-              <input type="radio" name="game" value="efootball" checked={game === "efootball"} onChange={(e) => setGame(e.target.value)} className="peer sr-only" />
-              <div className="p-4 bg-pp-bg border border-pp-border rounded-lg text-center peer-checked:border-pp-primary peer-checked:bg-pp-primary/5 transition-all">
-                <span className="font-bold block text-white">eFootball</span>
-              </div>
-              <div className="absolute top-2 right-2 w-3 h-3 rounded-full bg-pp-primary opacity-0 peer-checked:opacity-100 transition-opacity"></div>
-            </label>
+
+            <div 
+              onClick={() => setShowComingSoon(true)}
+              className="cursor-pointer relative p-4 bg-pp-bg/60 border border-pp-border rounded-lg text-center hover:border-pp-primary/40 transition-all"
+            >
+              <span className="font-bold block text-white/70">eFootball</span>
+              <span className="text-[10px] bg-yellow-500/20 text-yellow-400 font-bold uppercase px-2 py-0.5 rounded mt-1 inline-block">
+                Coming Soon
+              </span>
+            </div>
           </div>
         </div>
 
@@ -137,6 +148,13 @@ export default function CreateMatchPage() {
           CREATE MATCH
         </button>
       </form>
+
+      <ComingSoonModal
+        isOpen={showComingSoon}
+        onClose={() => setShowComingSoon(false)}
+        title="eFootball Matches Coming Soon"
+        description="eFootball match lobbies and AI result verification are currently in final integration. Dream League Soccer (DLS) is live and ready to play!"
+      />
     </div>
   );
 }
