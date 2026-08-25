@@ -68,8 +68,14 @@ export async function fetchDlsTrackerProfile(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // Mirrors what the browser tracker page sends. Not authentication —
-        // this endpoint has no auth, it's keyed entirely off the tracker id.
+        // A browser-like User-Agent is REQUIRED: the endpoint sits behind a
+        // CloudFront WAF that returns 403 to requests without one (verified
+        // against the live endpoint). These headers are NOT auth — the
+        // endpoint has none, it's keyed entirely off the tracker id; they
+        // just mirror what the real tracker page sends.
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/json, text/plain, */*",
         Origin: "https://tracker.ftgames.com",
         Referer: "https://tracker.ftgames.com/",
       },

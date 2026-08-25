@@ -35,9 +35,10 @@ export default function Navigation() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <Link href="/" className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded bg-pp-primary flex items-center justify-center text-black font-bold">
-                  PP
+              <Link href="/" className="flex items-center gap-2.5">
+                {/* Logo: dark rounded square with neon green border + bold P */}
+                <div className="w-9 h-9 rounded-xl bg-pp-bg border-2 border-pp-primary flex items-center justify-center shadow-[0_0_10px_rgba(57,255,20,0.3)] flex-shrink-0">
+                  <span className="text-pp-primary font-black text-lg leading-none">P</span>
                 </div>
                 <span className="text-xl font-bold tracking-tight text-white">PREDICTPLAY</span>
               </Link>
