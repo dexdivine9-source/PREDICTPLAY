@@ -1,6 +1,3 @@
-import Link from "next/link";
-import { Gamepad2, ShieldCheck } from "lucide-react";
-
 export default function Home() {
   return (
     <div className="min-h-screen">
@@ -18,22 +15,6 @@ export default function Home() {
             The verified competitive matchmaking and prediction platform for DLS & eFootball players.
             Play matches to build reputation, or spectate verified matches.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Link 
-              href="/matches" 
-              className="px-8 py-4 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-all transform hover:scale-105 flex items-center gap-2 w-full sm:w-auto justify-center uppercase tracking-wide"
-            >
-              <Gamepad2 size={20} />
-              FIND AN OPPONENT
-            </Link>
-            <Link 
-              href="/profile/create" 
-              className="px-8 py-4 bg-pp-surface border border-pp-border text-white font-bold rounded-lg hover:bg-pp-surface-hover transition-all flex items-center gap-2 w-full sm:w-auto justify-center uppercase tracking-wide"
-            >
-              <ShieldCheck size={20} className="text-pp-primary" />
-              VERIFY GAME PROFILE
-            </Link>
-          </div>
         </div>
       </section>
     </div>
