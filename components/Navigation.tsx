@@ -91,7 +91,6 @@ export default function Navigation() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2 pl-2 border-l border-pp-border">
-                  <Link href="/login" className="px-4 py-2 text-sm font-bold text-white hover:text-pp-primary transition-colors">LOGIN</Link>
                   <Link href="/register" className="px-4 py-2 text-sm font-bold bg-pp-primary text-black rounded hover:bg-pp-primary-dark transition-colors">REGISTER</Link>
                 </div>
               )}
