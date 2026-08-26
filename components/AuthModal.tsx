@@ -72,18 +72,27 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
         router.push("/profile/create");
       }
     } catch (err: any) {
-      console.error("Google sign-in error:", err);
+      console.error("[Google Sign-In Error]", {
+        code: err?.code,
+        message: err?.message,
+        authDomain: auth?.config?.authDomain,
+        projectId: auth?.app?.options?.projectId,
+        apiKey: auth?.app?.options?.apiKey ? `${auth.app.options.apiKey.slice(0, 8)}...` : undefined,
+      });
+
       if (
         err?.code === "auth/popup-closed-by-user" ||
         err?.code === "auth/cancelled-popup-request"
       ) {
         setError("Sign-in was cancelled. Please try again.");
       } else if (err?.code === "auth/unauthorized-domain") {
-        setError("This domain is not authorized in Firebase Console → Authentication → Settings → Authorized domains.");
+        setError(
+          `Domain not authorized for Firebase project "${auth?.app?.options?.projectId || 'current'}". Ensure your Vercel domain is added in Firebase Console under project ${auth?.app?.options?.projectId || 'predictplay-10230'} → Auth → Settings → Authorized domains, and that NEXT_PUBLIC_FIREBASE_API_KEY matches this project.`
+        );
       } else if (err?.code === "auth/operation-not-allowed") {
         setError("Google Sign-In is not enabled yet in Firebase Console → Authentication → Sign-in method.");
       } else {
-        setError(err?.message || "Failed to sign in with Google. Please try again.");
+        setError(err?.message ? `[${err?.code || 'auth-error'}]: ${err.message}` : "Failed to sign in with Google. Please try again.");
       }
     } finally {
       setLoading(false);
