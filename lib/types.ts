@@ -21,27 +21,43 @@ export type EvidencePhase = "START" | "END" | "PROFILE";
 export type AnalysisStatus = "PENDING" | "QUEUED" | "COMPLETE" | "FAILED";
 
 export interface PlayerProfile {
+  id?: string;
   userId: string;
+  username?: string;
+  referralCode?: string;
+  referral_code?: string;
+  isVerified?: boolean;
+  is_verified?: boolean;
   game?: GameType;
   gameUsername?: string;
+  game_username?: string;
+  team?: string;
+  gameProfileScreenshotUrl?: string;
+  game_profile_screenshot_url?: string;
   verificationStatus?: VerificationStatus;
+  verification_status?: string;
   profileEvidenceId?: string;
   profileHash?: string;
   trustScore?: number;
-  lastVerificationAt?: any; // Firestore Timestamp
+  trust_score?: number;
+  reputation?: number;
+  lastVerificationAt?: any;
   createdAt?: any;
   updatedAt?: any;
-  // DLS Live tracker link (tracker.ftgames.com) — confirms the profile
-  // exists with real match history, but NOT that this account owns it.
-  // See lib/dls-tracker.ts. Status stays LINKED (not VERIFIED) until
-  // ownership is confirmed by some other means.
   trackerId?: string;
+  tracker_id?: string;
   trackerTeamName?: string;
+  tracker_team_name?: string;
   trackerPlayed?: number;
+  tracker_played?: number;
   trackerWon?: number;
+  tracker_won?: number;
   trackerLost?: number;
+  tracker_lost?: number;
   trackerDivision?: number;
+  tracker_division?: number;
   trackerLinkedAt?: any;
+  tracker_linked_at?: any;
 }
 
 export interface Match {

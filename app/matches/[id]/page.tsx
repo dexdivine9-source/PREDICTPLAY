@@ -6,13 +6,14 @@ import { ShieldCheck, ShieldAlert, Swords } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
+import VerificationRequiredModal from "@/components/VerificationRequiredModal";
 
 export const dynamic = "force-dynamic";
 
 export default function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const matchId = resolvedParams.id;
-  const { user, wallet, refreshProfile } = useAuth();
+  const { user, profile, wallet, refreshProfile } = useAuth();
   const router = useRouter();
   
   const [match, setMatch] = useState<any>(null);
@@ -20,6 +21,8 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verifyModalAction, setVerifyModalAction] = useState("participate in this match");
   
   const [predictOutcome, setPredictOutcome] = useState<"p1" | "p2" | "draw">("p1");
   const [predictAmount, setPredictAmount] = useState<string>("100");
@@ -28,6 +31,13 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
   const handlePredict = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    if (!profile?.is_verified) {
+      setVerifyModalAction("place predictions");
+      setShowVerifyModal(true);
+      return;
+    }
+
     const amountNum = parseInt(predictAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
       setError("Invalid prediction amount");
@@ -127,6 +137,13 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
       router.push("/login");
       return;
     }
+
+    if (!profile?.is_verified) {
+      setVerifyModalAction("join this competitive match");
+      setShowVerifyModal(true);
+      return;
+    }
+
     setJoinLoading(true);
     setError("");
     try {
@@ -390,6 +407,12 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
         </div>
 
       </div>
+
+      <VerificationRequiredModal
+        isOpen={showVerifyModal}
+        onClose={() => setShowVerifyModal(false)}
+        actionName={verifyModalAction}
+      />
     </div>
   );
 }

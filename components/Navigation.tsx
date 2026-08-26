@@ -7,6 +7,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { useAuth } from "@/components/AuthProvider";
 import AuthModal from "@/components/AuthModal";
+import VerificationBanner from "@/components/VerificationBanner";
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -160,6 +161,8 @@ export default function Navigation() {
           </div>
         )}
       </nav>
+      
+      <VerificationBanner />
       
       {/* Bottom mobile nav for quick access */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-pp-bg border-t border-pp-border pb-safe">

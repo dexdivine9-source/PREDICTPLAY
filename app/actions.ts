@@ -68,6 +68,18 @@ export async function placePredictionAction(
 
   const supabase = await createClient();
 
+  const { data: profile } = await supabase
+    .from("player_profiles")
+    .select("is_verified")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!profile || !profile.is_verified) {
+    throw new Error(
+      "Profile verification required: You must complete profile verification before placing predictions."
+    );
+  }
+
   const { data: wallet } = await supabase
     .from("virtual_wallets")
     .select("*")

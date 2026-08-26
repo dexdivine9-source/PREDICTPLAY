@@ -6,9 +6,10 @@ import { Copy, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import ComingSoonModal from "@/components/ComingSoonModal";
+import VerificationRequiredModal from "@/components/VerificationRequiredModal";
 
 export default function CreateMatchPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [created, setCreated] = useState(false);
   const [matchId, setMatchId] = useState("");
   const [copied, setCopied] = useState(false);
@@ -16,11 +17,17 @@ export default function CreateMatchPage() {
   const [stake, setStake] = useState(100);
   const [error, setError] = useState("");
   const [showComingSoon, setShowComingSoon] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
   
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) {
       setError("You must be logged in to create a match.");
+      return;
+    }
+
+    if (!profile?.is_verified) {
+      setShowVerifyModal(true);
       return;
     }
     
@@ -161,6 +168,12 @@ export default function CreateMatchPage() {
         onClose={() => setShowComingSoon(false)}
         title="eFootball Matches Coming Soon"
         description="eFootball match lobbies and AI result verification are currently in final integration. Dream League Soccer (DLS) is live and ready to play!"
+      />
+
+      <VerificationRequiredModal
+        isOpen={showVerifyModal}
+        onClose={() => setShowVerifyModal(false)}
+        actionName="create a matchmaking challenge"
       />
     </div>
   );
