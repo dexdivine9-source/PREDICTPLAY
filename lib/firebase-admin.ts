@@ -3,8 +3,8 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 
-const projectId = process.env.FIREBASE_PROJECT_ID ?? "pharma-e-493405";
-const databaseId = process.env.FIREBASE_DATABASE_ID ?? process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID ?? "ai-studio-predictplay-f47b832e-a0f9-4c78-9648-5d8cf0dd0763";
+const projectId = process.env.FIREBASE_PROJECT_ID ?? "predictplay-10230";
+const databaseId = process.env.FIREBASE_DATABASE_ID ?? process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID;
 const storageBucket = process.env.FIREBASE_STORAGE_BUCKET ?? `${projectId}.firebasestorage.app`;
 
 if (!getApps().length) {
@@ -23,7 +23,7 @@ if (!getApps().length) {
   }
 }
 
-export const adminDb = getFirestore();
-adminDb.settings({ databaseId });
+export const adminDb = databaseId ? getFirestore(databaseId) : getFirestore();
 export const adminAuth = getAuth();
 export const adminStorage = getStorage();
+
