@@ -20,12 +20,15 @@ export type VerificationStatus = "PENDING" | "PROCESSING" | "LINKED" | "VERIFIED
 export type EvidencePhase = "START" | "END" | "PROFILE";
 export type AnalysisStatus = "PENDING" | "QUEUED" | "COMPLETE" | "FAILED";
 
+export type UserRole = "player" | "admin";
+
 export interface PlayerProfile {
   id?: string;
   userId: string;
   username?: string;
   referralCode?: string;
   referral_code?: string;
+  role?: UserRole;
   isVerified?: boolean;
   is_verified?: boolean;
   game?: GameType;
@@ -41,6 +44,10 @@ export interface PlayerProfile {
   trustScore?: number;
   trust_score?: number;
   reputation?: number;
+  isAdmin?: boolean;
+  is_admin?: boolean;
+  rejectionReason?: string;
+  rejection_reason?: string;
   lastVerificationAt?: any;
   createdAt?: any;
   updatedAt?: any;

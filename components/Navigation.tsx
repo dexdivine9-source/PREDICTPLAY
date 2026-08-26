@@ -13,7 +13,13 @@ export default function Navigation() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const { user, wallet, signOut } = useAuth();
+  const { user, profile, wallet, signOut } = useAuth();
+  
+  const isAdmin = Boolean(
+    profile?.is_admin ||
+    user?.user_metadata?.role === "admin" ||
+    user?.app_metadata?.role === "admin"
+  );
 
   const desktopLinks = [
     { href: "/matches", label: "Matches", icon: Gamepad2 },
@@ -67,6 +73,14 @@ export default function Navigation() {
             </div>
             
             <div className="hidden md:flex items-center space-x-4">
+              {isAdmin && (
+                <Link
+                  href="/admin/verifications"
+                  className="px-3 py-1.5 rounded-md bg-pp-surface border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 font-bold text-xs uppercase tracking-wider transition-colors"
+                >
+                  Admin Panel
+                </Link>
+              )}
               <Link href="/matches/create" className="px-4 py-2 rounded-md bg-pp-surface border border-pp-primary/50 text-pp-primary font-bold text-sm hover:bg-pp-primary hover:text-black transition-colors">
                 POST CHALLENGE
               </Link>
@@ -132,6 +146,15 @@ export default function Navigation() {
               <Link href="/matches/create" className="block px-3 py-2 text-center rounded-md bg-pp-primary text-black font-bold mb-4">
                 POST CHALLENGE
               </Link>
+              {isAdmin && (
+                <Link
+                  href="/admin/verifications"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block px-3 py-2 text-center rounded-md bg-pp-surface border border-amber-500/40 text-amber-400 font-bold mb-4"
+                >
+                  ADMIN PANEL
+                </Link>
+              )}
               {mobileLinks.map((link) => {
                 const Icon = link.icon;
                 const isActive = pathname === link.href;

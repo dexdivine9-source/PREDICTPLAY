@@ -158,6 +158,14 @@ export async function saveVerificationAction(data: {
 
   const supabase = await createClient();
 
+  const { data: existingProfile } = await supabase
+    .from("player_profiles")
+    .select("is_verified, verification_status")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const isAlreadyVerified = existingProfile?.is_verified === true;
+
   const updateData: any = {
     id: userId,
     user_id: userId,
@@ -166,14 +174,11 @@ export async function saveVerificationAction(data: {
     game_profile_screenshot_url: cleanScreenshotUrl || null,
     tracker_id: cleanTrackerId || null,
     team: cleanTeam || null,
-    is_verified: hasAllFields,
-    verification_status: hasAllFields ? "VERIFIED" : "PENDING",
+    is_verified: isAlreadyVerified, // Only admins approve to make is_verified = true
+    verification_status: isAlreadyVerified ? "VERIFIED" : hasAllFields ? "PENDING" : "IN_PROGRESS",
+    rejection_reason: null, // Clear any previous rejection on new submission
     updated_at: new Date().toISOString(),
   };
-
-  if (hasAllFields) {
-    updateData.last_verified_at = new Date().toISOString();
-  }
 
   // Update player_profiles
   const { error: profileError } = await supabase

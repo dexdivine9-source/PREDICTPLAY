@@ -7,10 +7,42 @@ export async function getAuthUser() {
   if (error || !user) {
     throw new Error("Unauthorized: Invalid or missing auth session");
   }
+
+  // 1. Check user metadata / app metadata
+  let isAdmin = user.user_metadata?.role === "admin" || user.app_metadata?.role === "admin" || user.user_metadata?.is_admin === true;
+
+  // 2. Check admin email / id allowlists if configured
+  const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+  const adminIds = (process.env.ADMIN_USER_IDS || "").split(",").map(id => id.trim()).filter(Boolean);
+
+  if (user.email && adminEmails.includes(user.email.toLowerCase())) {
+    isAdmin = true;
+  }
+  if (adminIds.includes(user.id)) {
+    isAdmin = true;
+  }
+
+  // 3. Check role / is_admin column in player_profiles
+  if (!isAdmin) {
+    try {
+      const { data: profile } = await supabase
+        .from("player_profiles")
+        .select("role, is_admin")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profile?.role === "admin" || profile?.is_admin === true) {
+        isAdmin = true;
+      }
+    } catch {
+      // Ignore column lookup if missing
+    }
+  }
   
   return {
     ...user,
     uid: user.id,
-    admin: user.user_metadata?.role === "admin" || user.app_metadata?.role === "admin",
+    admin: isAdmin,
+    role: isAdmin ? ("admin" as const) : ("player" as const),
   };
 }
