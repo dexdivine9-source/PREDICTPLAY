@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Trophy, Search, ShieldCheck, Users as UsersIcon } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { collection, query, getDocs, limit } from "firebase/firestore";
+import { supabase } from "@/lib/supabase";
 import ComingSoonModal from "@/components/ComingSoonModal";
 
 interface RankedPlayer {
@@ -27,25 +26,28 @@ export default function RankingsPage() {
   useEffect(() => {
     async function fetchRankings() {
       try {
-        const q = query(
-          collection(db, "player_profiles"),
-          limit(50)
-        );
-        const snapshot = await getDocs(q);
-        const list: RankedPlayer[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          list.push({
-            id: doc.id,
-            username: data.gamertag || data.username || "Player",
-            game: data.game || "DLS",
-            reputation: data.reputation ?? 100,
-            isVerified: data.isVerified ?? false,
-            trustScore: data.trustScore ?? 0,
-            matchesCount: data.matchesCount ?? 0,
-          });
-        });
-        list.sort((a, b) => b.reputation - a.reputation);
+        const { data, error } = await supabase
+          .from("player_profiles")
+          .select("*")
+          .order("reputation", { ascending: false })
+          .limit(50);
+
+        if (error) {
+          console.error("Error loading rankings from Supabase:", error);
+          setPlayers([]);
+          return;
+        }
+
+        const list: RankedPlayer[] = (data || []).map((item) => ({
+          id: item.id || item.user_id,
+          username: item.gamertag || item.username || "Player",
+          game: item.game || "DLS",
+          reputation: item.reputation ?? 100,
+          isVerified: item.is_verified ?? false,
+          trustScore: item.trust_score ?? 0,
+          matchesCount: item.matches_count ?? 0,
+        }));
+
         setPlayers(list);
       } catch (err) {
         console.error("Error loading rankings:", err);

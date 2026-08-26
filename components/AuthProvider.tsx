@@ -1,9 +1,8 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { User, onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { User } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
 interface AuthContextType {
   user: User | null;
@@ -11,9 +10,17 @@ interface AuthContextType {
   profile: any | null;
   wallet: any | null;
   refreshProfile: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, loading: true, profile: null, wallet: null, refreshProfile: async () => {} });
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  loading: true,
+  profile: null,
+  wallet: null,
+  refreshProfile: async () => {},
+  signOut: async () => {},
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -23,52 +30,83 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = async (uid: string) => {
     try {
-      const docRef = doc(db, "player_profiles", uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setProfile(docSnap.data());
-      } else {
-        setProfile(null);
-      }
+      const { data: profileData } = await supabase
+        .from("player_profiles")
+        .select("*")
+        .eq("id", uid)
+        .maybeSingle();
 
-      const walletRef = doc(db, "virtual_wallets", uid);
-      const walletSnap = await getDoc(walletRef);
-      if (walletSnap.exists()) {
-        setWallet(walletSnap.data());
-      } else {
-        setWallet(null);
-      }
+      setProfile(profileData || null);
+
+      const { data: walletData } = await supabase
+        .from("virtual_wallets")
+        .select("*")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      setWallet(walletData || null);
     } catch (e) {
-      console.error("Error fetching profile:", e);
+      console.error("Error fetching Supabase profile:", e);
     }
   };
 
   const refreshProfile = async () => {
     if (user) {
-      await fetchProfile(user.uid);
+      await fetchProfile(user.id);
     }
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        const token = await user.getIdToken();
-        document.cookie = `auth_token=${token}; path=/; max-age=3600; Secure; SameSite=Strict`;
-        await fetchProfile(user.uid);
-      } else {
-        document.cookie = `auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=Strict`;
-        setProfile(null);
-        setWallet(null);
-      }
-      setLoading(false);
-    });
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
+    setWallet(null);
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    // Initial session load
+    const loadSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUser(session.user);
+          await fetchProfile(session.user.id);
+        } else {
+          setUser(null);
+          setProfile(null);
+          setWallet(null);
+        }
+      } catch (err) {
+        console.error("Error checking auth session:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          setUser(session.user);
+          await fetchProfile(session.user.id);
+        } else {
+          setUser(null);
+          setProfile(null);
+          setWallet(null);
+        }
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, profile, wallet, loading, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, wallet, loading, refreshProfile, signOut }}>
       {children}
     </AuthContext.Provider>
   );

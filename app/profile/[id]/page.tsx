@@ -2,9 +2,8 @@
 
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
-import { Trophy, Gamepad2, Medal, Share2, ShieldCheck, Activity, Users as UsersIcon, ArrowLeft } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { doc, getDoc, collection, query, where, getDocs, limit } from "firebase/firestore";
+import { Gamepad2, ShieldCheck, Activity, Users as UsersIcon, ArrowLeft } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface ProfileData {
   id: string;
@@ -24,41 +23,27 @@ export default function ProfilePage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     async function loadProfile() {
       try {
-        const docRef = doc(db, "player_profiles", resolvedParams.id);
-        const docSnap = await getDoc(docRef);
+        const id = resolvedParams.id;
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
+        // Try query by id or user_id
+        const { data, error } = await supabase
+          .from("player_profiles")
+          .select("*")
+          .or(`id.eq.${id},user_id.eq.${id}`)
+          .maybeSingle();
+
+        if (data) {
           setProfile({
-            id: docSnap.id,
+            id: data.id || data.user_id,
             username: data.gamertag || data.username || "Player",
             game: data.game || "DLS",
             reputation: data.reputation ?? 100,
-            isVerified: data.isVerified ?? false,
-            trustScore: data.trustScore ?? 0,
-            createdAt: data.createdAt,
+            isVerified: data.is_verified ?? false,
+            trustScore: data.trust_score ?? 0,
+            createdAt: data.created_at,
           });
         } else {
-          // Check if userId was passed instead of profileId
-          const q = query(
-            collection(db, "player_profiles"),
-            where("userId", "==", resolvedParams.id),
-            limit(1)
-          );
-          const qSnap = await getDocs(q);
-          if (!qSnap.empty) {
-            const first = qSnap.docs[0];
-            const data = first.data();
-            setProfile({
-              id: first.id,
-              username: data.gamertag || data.username || "Player",
-              game: data.game || "DLS",
-              reputation: data.reputation ?? 100,
-              isVerified: data.isVerified ?? false,
-              trustScore: data.trustScore ?? 0,
-              createdAt: data.createdAt,
-            });
-          }
+          setProfile(null);
         }
       } catch (err) {
         console.error("Failed to load profile:", err);

@@ -6,15 +6,13 @@ import { Home, Trophy, Gamepad2, User, Bell, Menu, X, PlaySquare, LogOut } from 
 import { useState } from "react";
 import clsx from "clsx";
 import { useAuth } from "@/components/AuthProvider";
-import { auth } from "@/lib/firebase";
-import { signOut } from "firebase/auth";
 import AuthModal from "@/components/AuthModal";
 
 export default function Navigation() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const { user, wallet } = useAuth();
+  const { user, wallet, signOut } = useAuth();
 
   const desktopLinks = [
     { href: "/matches", label: "Matches", icon: Gamepad2 },
@@ -87,7 +85,7 @@ export default function Navigation() {
                     </div>
                     {user.email?.split('@')[0]}
                   </Link>
-                  <button onClick={() => signOut(auth)} className="text-pp-text-muted hover:text-red-500 transition-colors">
+                  <button onClick={() => signOut()} className="text-pp-text-muted hover:text-red-500 transition-colors">
                     <LogOut size={18} />
                   </button>
                 </div>
@@ -153,7 +151,7 @@ export default function Navigation() {
                 );
               })}
               {user && (
-                <button onClick={() => signOut(auth)} className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-red-500 hover:bg-pp-bg flex items-center gap-3 uppercase">
+                <button onClick={() => signOut()} className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-red-500 hover:bg-pp-bg flex items-center gap-3 uppercase">
                   <LogOut size={20} />
                   Logout
                 </button>

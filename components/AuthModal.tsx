@@ -2,10 +2,7 @@
 
 import { useState } from "react";
 import { X, Trophy, ShieldCheck } from "lucide-react";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { useRouter } from "next/navigation";
-import { auth, db } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -15,7 +12,6 @@ interface AuthModalProps {
 export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const router = useRouter();
 
   if (!isOpen) return null;
 
@@ -31,70 +27,24 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setError("");
 
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-
-      // Sync base user record
-      try {
-        await setDoc(
-          doc(db, "users", user.uid),
-          {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            lastLoginAt: serverTimestamp(),
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+      const { error: signInError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
           },
-          { merge: true }
-        );
-      } catch (dbErr) {
-        console.warn("Could not sync user document to firestore:", dbErr);
-      }
-
-      // Check if player profile exists
-      let hasProfile = false;
-      try {
-        const profileSnap = await getDoc(doc(db, "player_profiles", user.uid));
-        hasProfile = profileSnap.exists();
-      } catch (profileErr) {
-        console.warn("Could not check player profile:", profileErr);
-      }
-
-      onClose();
-
-      // Route new players to profile setup; existing players go home
-      if (hasProfile) {
-        router.push("/");
-      } else {
-        router.push("/profile/create");
-      }
-    } catch (err: any) {
-      console.error("[Google Sign-In Error]", {
-        code: err?.code,
-        message: err?.message,
-        authDomain: auth?.config?.authDomain,
-        projectId: auth?.app?.options?.projectId,
-        apiKey: auth?.app?.options?.apiKey ? `${auth.app.options.apiKey.slice(0, 8)}...` : undefined,
+        },
       });
 
-      if (
-        err?.code === "auth/popup-closed-by-user" ||
-        err?.code === "auth/cancelled-popup-request"
-      ) {
-        setError("Sign-in was cancelled. Please try again.");
-      } else if (err?.code === "auth/unauthorized-domain") {
-        setError(
-          `Domain not authorized for Firebase project "${auth?.app?.options?.projectId || 'current'}". Ensure your Vercel domain is added in Firebase Console under project ${auth?.app?.options?.projectId || 'predictplay-10230'} → Auth → Settings → Authorized domains, and that NEXT_PUBLIC_FIREBASE_API_KEY matches this project.`
-        );
-      } else if (err?.code === "auth/operation-not-allowed") {
-        setError("Google Sign-In is not enabled yet in Firebase Console → Authentication → Sign-in method.");
-      } else {
-        setError(err?.message ? `[${err?.code || 'auth-error'}]: ${err.message}` : "Failed to sign in with Google. Please try again.");
+      if (signInError) {
+        throw signInError;
       }
-    } finally {
+    } catch (err: any) {
+      console.error("[Supabase Google Sign-In Error]", err);
+      setError(err?.message || "Failed to initiate Google sign in. Please try again.");
       setLoading(false);
     }
   };
@@ -175,7 +125,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               </svg>
             )}
             <span className="text-sm font-bold">
-              {loading ? "Connecting to Google…" : "Continue with Google"}
+              {loading ? "Redirecting to Google…" : "Continue with Google"}
             </span>
           </button>
         </div>
@@ -194,4 +144,3 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     </div>
   );
 }
-

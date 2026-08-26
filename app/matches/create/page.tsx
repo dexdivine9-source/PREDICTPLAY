@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Copy, Check, Info } from "lucide-react";
-import { auth, db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { Copy, Check } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import ComingSoonModal from "@/components/ComingSoonModal";
 
@@ -31,15 +30,23 @@ export default function CreateMatchPage() {
     }
 
     try {
-      const docRef = await addDoc(collection(db, "matches"), {
-        creatorId: user.uid,
-        player1Id: user.uid,
-        game: "DLS",
-        stake: Number(stake),
-        state: "OPEN",
-        createdAt: serverTimestamp()
-      });
-      setMatchId(docRef.id);
+      const { data, error: insertError } = await supabase
+        .from("matches")
+        .insert({
+          creator_id: user.id,
+          player1_id: user.id,
+          game: "DLS",
+          stake_amount: Number(stake),
+          state: "OPEN",
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      const createdId = data.id;
+      setMatchId(createdId);
       setCreated(true);
     } catch (err: any) {
       setError(err.message);

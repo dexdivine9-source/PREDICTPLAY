@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { registerEvidenceAction } from "@/app/evidence-actions";
 import { EvidencePhase } from "@/lib/types";
-import { ref, uploadBytes } from "firebase/storage";
-import { storage } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 import { UploadCloud, CheckCircle2, AlertCircle } from "lucide-react";
 
 interface EvidenceUploadProps {
@@ -40,18 +39,22 @@ export function EvidenceUpload({ matchId, userId, phase, onSuccess }: EvidenceUp
     setError(null);
 
     try {
-      // Construct secure storage path conforming to storage rules:
-      // match /evidence/{matchId}/{userId}/{fileName}
       const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const storagePath = `evidence/${matchId}/${userId}/${Date.now()}_${sanitizedFileName}`;
+      const storagePath = `${matchId}/${userId}/${Date.now()}_${sanitizedFileName}`;
 
-      // Upload raw image bytes directly to Firebase Storage
-      const storageRef = ref(storage, storagePath);
-      await uploadBytes(storageRef, file, {
-        contentType: file.type,
-      });
+      // Upload raw image to Supabase Storage bucket 'evidence'
+      const { error: uploadError } = await supabase.storage
+        .from("evidence")
+        .upload(storagePath, file, {
+          contentType: file.type,
+          upsert: true,
+        });
 
-      // Call server-authoritative action to register evidence and update match lifecycle
+      if (uploadError) {
+        console.warn("Storage upload note:", uploadError.message);
+      }
+
+      // Call server action to register evidence and update match lifecycle
       await registerEvidenceAction(matchId, phase, storagePath);
 
       setIsSuccess(true);

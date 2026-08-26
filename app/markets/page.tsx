@@ -3,16 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PlaySquare, Users as UsersIcon, ArrowRight, ShieldCheck, Gamepad2, Plus } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { collection, query, getDocs, limit } from "firebase/firestore";
+import { supabase } from "@/lib/supabase";
 import ComingSoonModal from "@/components/ComingSoonModal";
 
 interface MarketMatch {
   id: string;
   game: string;
   state: string;
-  creatorGamertag?: string;
-  opponentGamertag?: string;
   player1Gamertag?: string;
   player2Gamertag?: string;
   totalPool?: number;
@@ -28,26 +25,33 @@ export default function MarketsPage() {
   useEffect(() => {
     async function fetchMatches() {
       try {
-        const q = query(
-          collection(db, "matches"),
-          limit(20)
-        );
-        const snap = await getDocs(q);
-        const list: MarketMatch[] = [];
-        snap.forEach((doc) => {
-          const data = doc.data();
-          list.push({
-            id: doc.id,
-            game: data.game || "DLS",
-            state: data.state || "OPEN",
-            creatorGamertag: data.creatorGamertag || "Player 1",
-            opponentGamertag: data.opponentGamertag || data.player2Gamertag || "Player 2",
-            player1Gamertag: data.player1Gamertag || data.creatorGamertag || "Player 1",
-            player2Gamertag: data.player2Gamertag || data.opponentGamertag || "Player 2",
-            totalPool: data.totalPool ?? 0,
-            predictionsCount: data.predictionsCount ?? 0,
-          });
+        // Fetch matches that have an active market (joined or in-progress)
+        const { data, error } = await supabase
+          .from("matches")
+          .select("*, markets(total_pool, status)")
+          .neq("state", "OPEN")
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (error) {
+          console.error("Error fetching market matches:", error);
+          setMatches([]);
+          return;
+        }
+
+        const list: MarketMatch[] = (data || []).map((item: any) => {
+          const market = Array.isArray(item.markets) ? item.markets[0] : item.markets;
+          return {
+            id: item.id,
+            game: item.game || "DLS",
+            state: item.state || "OPEN",
+            player1Gamertag: item.player1_gamertag || item.creator_gamertag || "Player 1",
+            player2Gamertag: item.player2_gamertag || item.opponent_gamertag || "Player 2",
+            totalPool: market?.total_pool ?? item.total_pool ?? 0,
+            predictionsCount: item.predictions_count ?? 0,
+          };
         });
+
         setMatches(list);
       } catch (err) {
         console.error("Error fetching market matches:", err);

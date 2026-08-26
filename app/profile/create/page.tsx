@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { createWalletAction } from "@/app/actions";
@@ -32,25 +31,28 @@ export default function ProfileCreatePage() {
     e.preventDefault();
     if (!user) return;
     try {
-      await setDoc(
-        doc(db, "player_profiles", user.uid),
-        {
-          userId: user.uid,
-          username,
-          gamertag: username,
-          game: "DLS",
-          reputation: 100, // starting reputation
-          trustScore: 100,
-          isVerified: false,
-          createdAt: serverTimestamp()
-        },
-        // Merge so tracker data linked earlier in this same flow (which
-        // writes tracker* fields + verificationStatus) isn't overwritten.
-        { merge: true }
-      );
+      const { error: profileError } = await supabase
+        .from("player_profiles")
+        .upsert(
+          {
+            id: user.id,
+            user_id: user.id,
+            username,
+            gamertag: username,
+            game: "DLS",
+            reputation: 100,
+            trust_score: 100,
+            is_verified: false,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        );
+
+      if (profileError) {
+        console.warn("Supabase upsert note:", profileError.message);
+      }
 
       await createWalletAction();
-
       await refreshProfile();
       router.push("/");
     } catch (err: any) {

@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Gamepad2, Plus, Swords, ShieldAlert } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, limit } from "firebase/firestore";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
 import ComingSoonModal from "@/components/ComingSoonModal";
@@ -20,16 +19,25 @@ export default function MatchesPage() {
   useEffect(() => {
     const fetchChallenges = async () => {
       try {
-        const q = query(
-          collection(db, "matches"), 
-          where("state", "==", "OPEN"), 
-          limit(20)
-        );
-        const querySnapshot = await getDocs(q);
-        const matchesData = [];
-        for (const doc of querySnapshot.docs) {
-          matchesData.push({ id: doc.id, ...doc.data() });
+        const { data, error } = await supabase
+          .from("matches")
+          .select("*")
+          .eq("state", "OPEN")
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (error) {
+          console.error("Failed to fetch matches:", error);
+          setChallenges([]);
+          return;
         }
+
+        const matchesData = (data || []).map((m: any) => ({
+          ...m,
+          creatorName: m.creator_name || m.creatorName,
+          creatorReputation: m.creator_reputation || m.creatorReputation,
+          stakeAmount: m.stake_amount || m.stakeAmount,
+        }));
         setChallenges(matchesData);
       } catch (e) {
         console.error("Failed to fetch matches", e);

@@ -1,8 +1,6 @@
 "use server";
 
-import { adminDb } from "@/lib/firebase-admin";
-import * as FirebaseFirestore from "firebase-admin/firestore";
-import { FieldValue } from "firebase-admin/firestore";
+import { createClient } from "@/lib/supabase/server";
 import { settleMarket } from "./actions";
 import { getAuthUser } from "@/lib/auth-server";
 
@@ -13,7 +11,7 @@ export async function adminResolveMatchAction(
 ) {
   const user = await getAuthUser();
   const adminId = user.uid;
-  
+
   if (!user.admin) {
     throw new Error("Unauthorized: Admin claims required");
   }
@@ -22,87 +20,112 @@ export async function adminResolveMatchAction(
     throw new Error("Missing required parameters for admin resolution");
   }
 
-  await adminDb.runTransaction(async (transaction) => {
-    const matchRef = adminDb.collection("matches").doc(matchId);
-    const matchDoc = await transaction.get(matchRef);
-    if (!matchDoc.exists) throw new Error("Match not found");
-    const data = matchDoc.data()!;
+  const supabase = await createClient();
 
-    if (data.state === "COMPLETED" || data.state === "CANCELLED") {
-      throw new Error("Match is already finalized");
-    }
+  const { data: matchData } = await supabase
+    .from("matches")
+    .select("*")
+    .eq("id", matchId)
+    .maybeSingle();
 
-    const previousState = data.state;
-    const newState = resolutionOutcome === "CANCELLED" ? "CANCELLED" : "COMPLETED";
+  if (!matchData) throw new Error("Match not found");
 
-    const actionRef = adminDb.collection("admin_actions").doc();
-    transaction.set(actionRef, {
-      actionId: actionRef.id,
-      adminId,
-      matchId,
-      action: "MANUAL_RESOLUTION",
-      previousState,
-      newState,
-      resolutionOutcome,
-      reason,
-      createdAt: FieldValue.serverTimestamp()
-    });
-
-    transaction.update(matchRef, {
-      state: newState,
-      verifiedOutcome: resolutionOutcome !== "CANCELLED" ? resolutionOutcome : null,
-      resolutionReason: `Admin resolved: ${reason}`,
-      resolvedAt: FieldValue.serverTimestamp()
-    });
-
-    if (newState === "COMPLETED" && resolutionOutcome !== "CANCELLED") {
-      await settleMarket(transaction, matchId, resolutionOutcome);
-    } else if (newState === "CANCELLED") {
-      await refundMarket(transaction, matchId);
-    }
-  });
-}
-
-async function refundMarket(transaction: FirebaseFirestore.Transaction, matchId: string) {
-  const marketRef = adminDb.collection("markets").doc(matchId);
-  const marketDoc = await transaction.get(marketRef);
-  
-  if (!marketDoc.exists) return;
-  const marketData = marketDoc.data()!;
-  
-  if (marketData.status === "REFUNDED" || marketData.status === "SETTLED") return;
-
-  const predictionsSnapshot = await adminDb.collection("predictions").where("marketId", "==", matchId).get();
-  const settlementId = adminDb.collection("settlements").doc().id;
-
-  for (const predDoc of predictionsSnapshot.docs) {
-    const predData = predDoc.data();
-    const predRef = predDoc.ref;
-
-    transaction.update(predRef, {
-      status: "REFUNDED",
-      payout: predData.amount,
-      settledAt: FieldValue.serverTimestamp(),
-      settlementId
-    });
-
-    const walletRef = adminDb.collection("virtual_wallets").doc(predData.userId);
-    transaction.update(walletRef, { balance: FieldValue.increment(predData.amount) });
-
-    const txRef = adminDb.collection("transactions").doc();
-    transaction.set(txRef, {
-      userId: predData.userId,
-      amount: predData.amount,
-      type: "PREDICTION_REFUNDED",
-      referenceId: matchId,
-      settlementId,
-      createdAt: FieldValue.serverTimestamp()
-    });
+  if (matchData.state === "COMPLETED" || matchData.state === "CANCELLED") {
+    throw new Error("Match is already finalized");
   }
 
-  transaction.update(marketRef, {
-    status: "REFUNDED",
-    settlementId,
-    settledAt: FieldValue.serverTimestamp()
+  const previousState = matchData.state;
+  const newState = resolutionOutcome === "CANCELLED" ? "CANCELLED" : "COMPLETED";
+
+  await supabase.from("admin_actions").insert({
+    admin_id: adminId,
+    match_id: matchId,
+    action: "MANUAL_RESOLUTION",
+    previous_state: previousState,
+    new_state: newState,
+    resolution_outcome: resolutionOutcome,
+    reason,
+    created_at: new Date().toISOString(),
   });
+
+  await supabase
+    .from("matches")
+    .update({
+      state: newState,
+      verified_outcome: resolutionOutcome !== "CANCELLED" ? resolutionOutcome : null,
+      resolution_reason: `Admin resolved: ${reason}`,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("id", matchId);
+
+  if (newState === "COMPLETED" && resolutionOutcome !== "CANCELLED") {
+    await settleMarket(matchId, resolutionOutcome);
+  } else if (newState === "CANCELLED") {
+    await refundMarket(matchId);
+  }
+}
+
+async function refundMarket(matchId: string) {
+  const supabase = await createClient();
+
+  const { data: marketData } = await supabase
+    .from("markets")
+    .select("*")
+    .eq("id", matchId)
+    .maybeSingle();
+
+  if (!marketData || marketData.status === "REFUNDED" || marketData.status === "SETTLED") {
+    return;
+  }
+
+  const { data: predictions } = await supabase
+    .from("predictions")
+    .select("*")
+    .eq("market_id", matchId);
+
+  if (predictions) {
+    for (const pred of predictions) {
+      await supabase
+        .from("predictions")
+        .update({
+          status: "REFUNDED",
+          payout: pred.amount,
+          settled_at: new Date().toISOString(),
+        })
+        .eq("id", pred.id);
+
+      // Refund to wallet
+      const { data: wallet } = await supabase
+        .from("virtual_wallets")
+        .select("balance")
+        .eq("user_id", pred.user_id)
+        .maybeSingle();
+
+      if (wallet) {
+        await supabase
+          .from("virtual_wallets")
+          .update({
+            balance: (wallet.balance || 0) + pred.amount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", pred.user_id);
+      }
+
+      await supabase.from("transactions").insert({
+        user_id: pred.user_id,
+        amount: pred.amount,
+        type: "PREDICTION_REFUNDED",
+        reference_id: matchId,
+        created_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  await supabase
+    .from("markets")
+    .update({
+      status: "REFUNDED",
+      settled_at: new Date().toISOString(),
+    })
+    .eq("id", matchId);
 }

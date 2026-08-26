@@ -1,7 +1,6 @@
 "use server";
 
-import { adminDb, adminStorage } from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createClient } from "@/lib/supabase/server";
 import { EvidencePhase } from "@/lib/types";
 import { getAuthUser } from "@/lib/auth-server";
 import { analyzeImageWithGemini, type AiPayload } from "@/lib/gemini-vision";
@@ -19,164 +18,174 @@ export async function registerEvidenceAction(
     throw new Error("Missing required evidence fields");
   }
 
+  const supabase = await createClient();
+
   // 1. Verify match participation
-  const matchRef = adminDb.collection("matches").doc(matchId);
-  const matchDoc = await matchRef.get();
-  
-  if (!matchDoc.exists) throw new Error("Match not found");
-  const matchData = matchDoc.data()!;
-  
-  if (matchData.player1Id !== userId && matchData.player2Id !== userId) {
+  const { data: matchData } = await supabase
+    .from("matches")
+    .select("*")
+    .eq("id", matchId)
+    .maybeSingle();
+
+  if (!matchData) throw new Error("Match not found");
+
+  if (matchData.player1_id !== userId && matchData.player2_id !== userId) {
     throw new Error("Unauthorized: You are not a participant in this match.");
   }
 
   // 2. Determine Evidence Session
-  const sessionRef = adminDb.collection("match_evidence_sessions").doc(matchId);
-  
-  await adminDb.runTransaction(async (transaction) => {
-    const sessionDoc = await transaction.get(sessionRef);
-    if (!sessionDoc.exists) {
-      transaction.set(sessionRef, {
-        matchId,
-        game: matchData.game,
-        player1Id: matchData.player1Id,
-        player2Id: matchData.player2Id,
-        status: "ACTIVE",
-        createdAt: FieldValue.serverTimestamp()
-      });
-    }
+  await supabase.from("match_evidence_sessions").upsert({
+    id: matchId,
+    match_id: matchId,
+    game: matchData.game,
+    player1_id: matchData.player1_id,
+    player2_id: matchData.player2_id,
+    status: "ACTIVE",
+    created_at: new Date().toISOString(),
+  });
 
-    // 3. Find if previous evidence exists to increment attempt number
-    const existingEvidenceSnap = await adminDb.collection("match_evidence")
-      .where("matchId", "==", matchId)
-      .where("userId", "==", userId)
-      .where("phase", "==", phase)
-      .orderBy("attemptNumber", "desc")
-      .limit(1)
-      .get();
-    
-    let attemptNumber = 1;
-    let supersedesEvidenceId = null;
+  // 3. Find if previous evidence exists to increment attempt number
+  const { data: existingEvidence } = await supabase
+    .from("match_evidence")
+    .select("*")
+    .eq("match_id", matchId)
+    .eq("user_id", userId)
+    .eq("phase", phase)
+    .order("attempt_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-    if (!existingEvidenceSnap.empty) {
-      const prevDoc = existingEvidenceSnap.docs[0];
-      attemptNumber = prevDoc.data().attemptNumber + 1;
-      supersedesEvidenceId = prevDoc.id;
-    }
+  const attemptNumber = existingEvidence ? (existingEvidence.attempt_number || 1) + 1 : 1;
+  const supersedesEvidenceId = existingEvidence ? existingEvidence.id : null;
 
-    // 4. Create new evidence record
-    const evidenceRef = adminDb.collection("match_evidence").doc();
-    transaction.set(evidenceRef, {
-      evidenceId: evidenceRef.id,
-      matchId,
-      userId,
+  // 4. Create new evidence record
+  const { data: newEvidence } = await supabase
+    .from("match_evidence")
+    .insert({
+      match_id: matchId,
+      user_id: userId,
       type: "SCREENSHOT",
       phase,
-      attemptNumber,
-      supersedesEvidenceId,
-      storagePath,
-      uploadedAt: FieldValue.serverTimestamp(),
-      analysisStatus: "QUEUED"
-    });
-    
-    // Update match state
-    if (phase === "START") {
-      transaction.update(matchRef, { state: "START_EVIDENCE_PROCESSING" });
-    } else if (phase === "END") {
-      transaction.update(matchRef, { state: "END_EVIDENCE_PROCESSING" });
-    }
-  });
+      attempt_number: attemptNumber,
+      supersedes_evidence_id: supersedesEvidenceId,
+      storage_path: storagePath,
+      uploaded_at: new Date().toISOString(),
+      analysis_status: "QUEUED",
+    })
+    .select()
+    .single();
+
+  // Update match state
+  if (phase === "START") {
+    await supabase
+      .from("matches")
+      .update({ state: "START_EVIDENCE_PROCESSING", updated_at: new Date().toISOString() })
+      .eq("id", matchId);
+  } else if (phase === "END") {
+    await supabase
+      .from("matches")
+      .update({ state: "END_EVIDENCE_PROCESSING", updated_at: new Date().toISOString() })
+      .eq("id", matchId);
+  }
+
+  return newEvidence;
 }
 
-/**
- * Internal: runs the REAL Gemini Vision analysis for a single evidence doc.
- *
- * Not exported => not a client-callable server action. It is invoked by the
- * admin-gated analyzeEvidenceAction below, and can be called by the upload
- * pipeline directly once auto-analysis is enabled.
- *
- * The Storage download and the Gemini call run OUTSIDE any Firestore
- * transaction on purpose: transactions retry on contention, and a retried
- * model call would be billed again. We read the doc, do the slow work, then
- * write once. Per the gemini-vision security contract, ANY failure sets
- * analysisStatus = FAILED with a reason — there is no silent fallback to
- * fabricated data.
- */
 async function performEvidenceAnalysis(
   evidenceId: string,
   simulatedPayload?: AiPayload
 ): Promise<void> {
-  const evidenceRef = adminDb.collection("match_evidence").doc(evidenceId);
+  const supabase = await createClient();
 
-  const snap = await evidenceRef.get();
-  if (!snap.exists) throw new Error("Evidence not found");
-  const evidence = snap.data()!;
+  const { data: evidence } = await supabase
+    .from("match_evidence")
+    .select("*")
+    .eq("id", evidenceId)
+    .maybeSingle();
 
-  // Idempotent: never re-run (and re-bill) an already-completed analysis.
-  if (evidence.analysisStatus === "COMPLETE") return;
+  if (!evidence) throw new Error("Evidence not found");
 
-  // Explicit test/replay override skips the model call entirely.
+  if (evidence.analysis_status === "COMPLETE") return;
+
   if (simulatedPayload) {
-    await evidenceRef.update({
-      analysisStatus: "COMPLETE",
-      aiPayload: simulatedPayload,
-      analysisCompletedAt: FieldValue.serverTimestamp(),
-    });
+    await supabase
+      .from("match_evidence")
+      .update({
+        analysis_status: "COMPLETE",
+        ai_payload: simulatedPayload,
+        analysis_completed_at: new Date().toISOString(),
+      })
+      .eq("id", evidenceId);
     return;
   }
 
-  const storagePath: string | undefined = evidence.storagePath;
+  const storagePath: string | undefined = evidence.storage_path;
   if (!storagePath) {
-    await evidenceRef.update({
-      analysisStatus: "FAILED",
-      analysisFailureReason: "Evidence record has no storagePath",
-    });
+    await supabase
+      .from("match_evidence")
+      .update({
+        analysis_status: "FAILED",
+        analysis_failure_reason: "Evidence record has no storage_path",
+      })
+      .eq("id", evidenceId);
     return;
   }
 
-  // Pull raw bytes + content type from Storage (slow I/O, outside any txn).
   let imageBytes: Buffer;
-  let mimeType: string;
+  let mimeType = "image/jpeg";
+
   try {
-    const file = adminStorage.bucket().file(storagePath);
-    const [metadata] = await file.getMetadata();
-    mimeType = metadata.contentType || "image/jpeg";
-    const [bytes] = await file.download();
-    imageBytes = bytes;
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from("evidence")
+      .download(storagePath);
+
+    if (downloadError || !fileData) {
+      throw new Error(downloadError?.message || "Failed to download image from storage");
+    }
+
+    const arrayBuffer = await fileData.arrayBuffer();
+    imageBytes = Buffer.from(arrayBuffer);
+    mimeType = fileData.type || "image/jpeg";
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    await evidenceRef.update({
-      analysisStatus: "FAILED",
-      analysisFailureReason: "Could not read evidence from Storage: " + msg,
-    });
+    await supabase
+      .from("match_evidence")
+      .update({
+        analysis_status: "FAILED",
+        analysis_failure_reason: "Could not read evidence from Storage: " + msg,
+      })
+      .eq("id", evidenceId);
     return;
   }
 
   const outcome = await analyzeImageWithGemini(imageBytes, mimeType, storagePath);
 
   if (outcome.success) {
-    await evidenceRef.update({
-      analysisStatus: "COMPLETE",
-      aiPayload: outcome.payload,
-      imageHash: outcome.imageHash,
-      mimeType,
-      analysisCompletedAt: FieldValue.serverTimestamp(),
-    });
+    await supabase
+      .from("match_evidence")
+      .update({
+        analysis_status: "COMPLETE",
+        ai_payload: outcome.payload,
+        image_hash: outcome.imageHash,
+        mime_type: mimeType,
+        analysis_completed_at: new Date().toISOString(),
+      })
+      .eq("id", evidenceId);
   } else {
-    await evidenceRef.update({
-      analysisStatus: "FAILED",
-      analysisFailureReason: outcome.reason,
-    });
+    await supabase
+      .from("match_evidence")
+      .update({
+        analysis_status: "FAILED",
+        analysis_failure_reason: outcome.reason,
+      })
+      .eq("id", evidenceId);
   }
 }
 
 export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload?: AiPayload) {
-  // Admin-only manual / replay trigger. The real analysis lives in
-  // performEvidenceAnalysis; the automatic upload pipeline (once enabled)
-  // calls that helper directly, without this gate.
   const user = await getAuthUser();
   if (!user.admin) {
-    throw new Error("Unauthorized: Only admins or system processes can analyze evidence directly");
+    throw new Error("Unauthorized: Only admins can analyze evidence directly");
   }
 
   await performEvidenceAnalysis(evidenceId, simulatedPayload);
@@ -184,126 +193,153 @@ export async function analyzeEvidenceAction(evidenceId: string, simulatedPayload
 
 export async function verifyMatchAction(matchId: string) {
   const user = await getAuthUser();
-  // We can let any auth user trigger the deterministic engine, it relies only on trusted AI payload, not client data.
-  // But ideally, only admin or system process triggers this. We will enforce admin claim.
   if (!user.admin) {
-     throw new Error("Unauthorized");
+    throw new Error("Unauthorized");
   }
 
-  const matchRef = adminDb.collection("matches").doc(matchId);
-  
-  await adminDb.runTransaction(async (transaction) => {
-    const matchDoc = await transaction.get(matchRef);
-    if (!matchDoc.exists) throw new Error("Match not found");
-    const matchData = matchDoc.data()!;
+  const supabase = await createClient();
 
-    if (matchData.state === "COMPLETED" || matchData.state === "CANCELLED") {
-      throw new Error("Match is already resolved");
-    }
+  const { data: matchData } = await supabase
+    .from("matches")
+    .select("*")
+    .eq("id", matchId)
+    .maybeSingle();
 
-    const evidenceSnap = await transaction.get(
-      adminDb.collection("match_evidence").where("matchId", "==", matchId)
-    );
-    
-    const activeEvidence = new Map<string, any>(); 
-    
-    evidenceSnap.docs.forEach(doc => {
-      const data = doc.data();
-      const key = `${data.userId}_${data.phase}`;
-      if (!activeEvidence.has(key) || activeEvidence.get(key).attemptNumber < data.attemptNumber) {
-        activeEvidence.set(key, data);
+  if (!matchData) throw new Error("Match not found");
+
+  if (matchData.state === "COMPLETED" || matchData.state === "CANCELLED") {
+    throw new Error("Match is already resolved");
+  }
+
+  const { data: evidenceList } = await supabase
+    .from("match_evidence")
+    .select("*")
+    .eq("match_id", matchId);
+
+  const activeEvidence = new Map<string, any>();
+  if (evidenceList) {
+    evidenceList.forEach((item) => {
+      const key = `${item.user_id}_${item.phase}`;
+      if (!activeEvidence.has(key) || activeEvidence.get(key).attempt_number < item.attempt_number) {
+        activeEvidence.set(key, item);
       }
     });
+  }
 
-    const p1Start = activeEvidence.get(`${matchData.player1Id}_START`);
-    const p2Start = activeEvidence.get(`${matchData.player2Id}_START`);
-    const p1End = activeEvidence.get(`${matchData.player1Id}_END`);
-    const p2End = activeEvidence.get(`${matchData.player2Id}_END`);
+  const p1Start = activeEvidence.get(`${matchData.player1_id}_START`);
+  const p2Start = activeEvidence.get(`${matchData.player2_id}_START`);
+  const p1End = activeEvidence.get(`${matchData.player1_id}_END`);
+  const p2End = activeEvidence.get(`${matchData.player2_id}_END`);
 
-    if (!p1Start || !p2Start || !p1End || !p2End) {
-      transaction.update(matchRef, { state: "MANUAL_REVIEW", resolutionReason: "Missing evidence" });
-      return;
-    }
+  if (!p1Start || !p2Start || !p1End || !p2End) {
+    await supabase
+      .from("matches")
+      .update({ state: "MANUAL_REVIEW", resolution_reason: "Missing evidence" })
+      .eq("id", matchId);
+    return;
+  }
 
-    if (
-      p1Start.analysisStatus !== "COMPLETE" || p2Start.analysisStatus !== "COMPLETE" ||
-      p1End.analysisStatus !== "COMPLETE" || p2End.analysisStatus !== "COMPLETE"
-    ) {
-      return;
-    }
+  if (
+    p1Start.analysis_status !== "COMPLETE" ||
+    p2Start.analysis_status !== "COMPLETE" ||
+    p1End.analysis_status !== "COMPLETE" ||
+    p2End.analysis_status !== "COMPLETE"
+  ) {
+    return;
+  }
 
-    const p1Payload = p1End.aiPayload;
-    const p2Payload = p2End.aiPayload;
+  const p1Payload = p1End.ai_payload;
+  const p2Payload = p2End.ai_payload;
 
-    if (p1Payload.game !== matchData.game || p2Payload.game !== matchData.game) {
-      transaction.update(matchRef, { state: "MANUAL_REVIEW", resolutionReason: "Game mismatch" });
-      return;
-    }
+  if (p1Payload?.game !== matchData.game || p2Payload?.game !== matchData.game) {
+    await supabase
+      .from("matches")
+      .update({ state: "MANUAL_REVIEW", resolution_reason: "Game mismatch" })
+      .eq("id", matchId);
+    return;
+  }
 
-    const p1ScoreReport = p1Payload.score;
-    const p2ScoreReport = p2Payload.score;
+  const p1ScoreReport = p1Payload?.score;
+  const p2ScoreReport = p2Payload?.score;
 
-    if (
-      p1ScoreReport.player1 !== p2ScoreReport.player1 ||
-      p1ScoreReport.player2 !== p2ScoreReport.player2
-    ) {
-      transaction.update(matchRef, { state: "DISPUTED", resolutionReason: "Contradictory scores" });
-      return;
-    }
+  if (
+    !p1ScoreReport ||
+    !p2ScoreReport ||
+    p1ScoreReport.player1 !== p2ScoreReport.player1 ||
+    p1ScoreReport.player2 !== p2ScoreReport.player2
+  ) {
+    await supabase
+      .from("matches")
+      .update({ state: "DISPUTED", resolution_reason: "Contradictory scores" })
+      .eq("id", matchId);
+    return;
+  }
 
-    let confidence = 100;
-    if (p1Payload.possibleManipulation || p2Payload.possibleManipulation) confidence -= 50;
-    
-    if (confidence >= 90) {
-      const p1Final1 = p1ScoreReport.player1;
-      const p1Final2 = p1ScoreReport.player2;
-      
-      let winningOutcome = "draw";
-      if (p1Final1 > p1Final2) winningOutcome = "p1";
-      else if (p1Final2 > p1Final1) winningOutcome = "p2";
-      
-      transaction.update(matchRef, { 
+  let confidence = 100;
+  if (p1Payload.possibleManipulation || p2Payload.possibleManipulation) confidence -= 50;
+
+  if (confidence >= 90) {
+    const p1Final1 = p1ScoreReport.player1;
+    const p1Final2 = p1ScoreReport.player2;
+
+    let winningOutcome = "draw";
+    if (p1Final1 > p1Final2) winningOutcome = "p1";
+    else if (p1Final2 > p1Final1) winningOutcome = "p2";
+
+    await supabase
+      .from("matches")
+      .update({
         state: "AUTO_VERIFIED",
-        verifiedScoreP1: p1Final1,
-        verifiedScoreP2: p1Final2,
-        verifiedOutcome: winningOutcome,
-        verificationConfidence: confidence,
-        analysisCompletedAt: FieldValue.serverTimestamp()
-      });
-    } else {
-      transaction.update(matchRef, { state: "MANUAL_REVIEW", resolutionReason: "Low confidence", verificationConfidence: confidence });
-    }
-  });
+        verified_score_p1: p1Final1,
+        verified_score_p2: p1Final2,
+        verified_outcome: winningOutcome,
+        verification_confidence: confidence,
+        analysis_completed_at: new Date().toISOString(),
+      })
+      .eq("id", matchId);
+  } else {
+    await supabase
+      .from("matches")
+      .update({
+        state: "MANUAL_REVIEW",
+        resolution_reason: "Low confidence",
+        verification_confidence: confidence,
+      })
+      .eq("id", matchId);
+  }
 }
 
 export async function finalizeVerifiedMatchAction(matchId: string) {
-  // Should ideally be admin only
   const user = await getAuthUser();
   if (!user.admin) {
     throw new Error("Unauthorized");
   }
 
-  let winningOutcomeToSettle: string | null = null;
+  const supabase = await createClient();
 
-  await adminDb.runTransaction(async (transaction) => {
-    const matchRef = adminDb.collection("matches").doc(matchId);
-    const matchDoc = await transaction.get(matchRef);
-    if (!matchDoc.exists) throw new Error("Match not found");
-    const data = matchDoc.data()!;
+  const { data: matchData } = await supabase
+    .from("matches")
+    .select("*")
+    .eq("id", matchId)
+    .maybeSingle();
 
-    if (data.state !== "AUTO_VERIFIED" && data.state !== "MANUAL_REVIEW_VERIFIED") {
-      throw new Error("Match not ready for completion");
-    }
+  if (!matchData) throw new Error("Match not found");
 
-    winningOutcomeToSettle = data.verifiedOutcome;
+  if (matchData.state !== "AUTO_VERIFIED" && matchData.state !== "MANUAL_REVIEW_VERIFIED") {
+    throw new Error("Match not ready for completion");
+  }
 
-    transaction.update(matchRef, { 
+  const winningOutcomeToSettle = matchData.verified_outcome;
+
+  await supabase
+    .from("matches")
+    .update({
       state: "COMPLETED",
-      resolvedAt: FieldValue.serverTimestamp()
-    });
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("id", matchId);
 
-    if (winningOutcomeToSettle) {
-      await settleMarket(transaction, matchId, winningOutcomeToSettle);
-    }
-  });
+  if (winningOutcomeToSettle) {
+    await settleMarket(matchId, winningOutcomeToSettle);
+  }
 }

@@ -3,8 +3,7 @@
 import { useState, use, useEffect } from "react";
 import Link from "next/link";
 import { ShieldAlert, ShieldCheck, CheckCircle2, AlertTriangle, Clock, RefreshCw } from "lucide-react";
-import { db } from "@/lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { EvidenceUpload } from "@/components/evidence-upload";
 
@@ -23,17 +22,59 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
   const [reportedScore1, setReportedScore1] = useState<number | "">("");
   const [reportedScore2, setReportedScore2] = useState<number | "">("");
 
-  useEffect(() => {
-    const docRef = doc(db, "matches", matchId);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setMatch({ id: docSnap.id, ...docSnap.data() });
+  const loadMatch = async () => {
+    try {
+      const { data } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("id", matchId)
+        .maybeSingle();
+
+      if (data) {
+        setMatch({
+          id: data.id,
+          creatorId: data.creator_id || data.player1_id,
+          player1Id: data.player1_id || data.creator_id,
+          player2Id: data.player2_id,
+          game: data.game || "DLS",
+          state: data.state || "OPEN",
+          p1Submitted: data.p1_submitted ?? false,
+          p2Submitted: data.p2_submitted ?? false,
+          p1Score1: data.p1_score1,
+          p1Score2: data.p1_score2,
+          p2Score1: data.p2_score1,
+          p2Score2: data.p2_score2,
+          verifiedScoreP1: data.verified_score_p1,
+          verifiedScoreP2: data.verified_score_p2,
+          verificationConfidence: data.verification_confidence,
+          resolutionReason: data.resolution_reason,
+          ...data,
+        });
       } else {
         setMatch(null);
       }
+    } catch (err) {
+      console.error("Error fetching match:", err);
+    } finally {
       setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    loadMatch();
+
+    const channel = supabase
+      .channel(`match-verify-${matchId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "matches", filter: `id=eq.${matchId}` },
+        () => loadMatch()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [matchId]);
 
   if (loading) {
@@ -50,8 +91,8 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
     );
   }
 
-  const isCreator = user?.uid === match.creatorId;
-  const isJoined = user?.uid === match.player2Id;
+  const isCreator = user?.id === match.creatorId || user?.id === match.player1Id;
+  const isJoined = user?.id === match.player2Id;
   const isParticipant = isCreator || isJoined;
 
   if (!user || !isParticipant) {
@@ -75,8 +116,8 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
 
     try {
       const { submitMatchResultAction } = await import("@/app/actions");
-      // Calls server action with server-authoritative authentication
       await submitMatchResultAction(matchId, Number(reportedScore1), Number(reportedScore2), "");
+      await loadMatch();
     } catch (err: any) {
       setError(err.message || "Failed to submit score report.");
     } finally {
@@ -129,164 +170,144 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
           <p className="text-pp-text-muted mb-8 max-w-md mx-auto text-sm">
             Consensus reached and verified by the deterministic engine. Virtual points have been distributed.
           </p>
-          <div className="inline-block p-6 bg-pp-bg rounded-xl border border-pp-border mb-8">
-            <span className="block text-[10px] text-pp-text-muted font-bold mb-2 uppercase tracking-widest">OFFICIAL FINAL SCORE</span>
-            <span className="text-5xl font-black font-mono text-white">
-              {match.verifiedScoreP1 ?? match.finalScore1 ?? match.p1Score1} - {match.verifiedScoreP2 ?? match.finalScore2 ?? match.p1Score2}
-            </span>
+
+          <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto bg-pp-bg p-4 rounded-xl border border-pp-border mb-8">
+            <div>
+              <span className="text-xs text-pp-text-muted uppercase font-bold">Creator</span>
+              <span className="block text-2xl font-black text-white mt-1">
+                {match.verifiedScoreP1 ?? match.reportedScore1 ?? "—"}
+              </span>
+            </div>
+            <div>
+              <span className="text-xs text-pp-text-muted uppercase font-bold">Challenger</span>
+              <span className="block text-2xl font-black text-white mt-1">
+                {match.verifiedScoreP2 ?? match.reportedScore2 ?? "—"}
+              </span>
+            </div>
           </div>
-          <div>
-            <Link href="/matches" className="inline-block px-8 py-3.5 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors uppercase tracking-wide text-sm">
-              VIEW OTHER MATCHES
-            </Link>
-          </div>
+
+          <Link
+            href={`/matches/${matchId}`}
+            className="inline-block px-8 py-3 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors uppercase text-sm"
+          >
+            Back to Match Overview
+          </Link>
         </div>
       )}
 
-      {/* State: AUTO_VERIFIED */}
-      {match.state === "AUTO_VERIFIED" && (
-        <div className="bg-pp-surface border border-green-500/30 rounded-2xl p-8 md:p-12 text-center">
-          <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-green-500/20">
-            <CheckCircle2 size={40} className="text-green-400" />
+      {/* State: DISPUTED or MANUAL_REVIEW */}
+      {(match.state === "DISPUTED" || match.state === "MANUAL_REVIEW") && (
+        <div className="bg-pp-surface border border-red-500/30 rounded-2xl p-8 md:p-12 text-center mb-8 relative overflow-hidden">
+          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+            <AlertTriangle size={32} className="text-red-500" />
           </div>
-          <h2 className="text-3xl font-black text-green-400 mb-2 uppercase">AUTO-VERIFIED BY AI ENGINE</h2>
+          <h2 className="text-2xl font-black text-white mb-2 uppercase">
+            {match.state === "DISPUTED" ? "SCORE CONFLICT / DISPUTE" : "MANUAL REVIEW QUEUED"}
+          </h2>
           <p className="text-pp-text-muted mb-6 max-w-md mx-auto text-sm">
-            Both players&apos; evidence screenshots were analyzed and verified with confidence ({match.verificationConfidence ?? 100}%).
-          </p>
-          <div className="inline-block p-6 bg-pp-bg rounded-xl border border-pp-border mb-6">
-            <span className="block text-[10px] text-pp-text-muted font-bold mb-2 uppercase tracking-widest">VERIFIED OUTCOME</span>
-            <span className="text-4xl font-black font-mono text-white uppercase">
-              {match.verifiedOutcome === "p1" ? "CREATOR WIN (P1)" : match.verifiedOutcome === "p2" ? "CHALLENGER WIN (P2)" : "DRAW"}
-            </span>
-          </div>
-          <p className="text-xs text-pp-text-muted">Settlement is queued and will execute automatically.</p>
-        </div>
-      )}
-
-      {/* State: MANUAL_REVIEW */}
-      {match.state === "MANUAL_REVIEW" && (
-        <div className="bg-pp-surface border border-yellow-500/50 rounded-2xl p-8 md:p-12 text-center">
-          <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-500/20">
-            <Clock size={40} className="text-yellow-500" />
-          </div>
-          <h2 className="text-3xl font-black text-yellow-500 mb-2 uppercase">UNDER MANUAL REVIEW</h2>
-          <p className="text-pp-text-muted max-w-md mx-auto text-sm mb-4">
-            An anomaly or low verification confidence was detected. Platform arbiters are reviewing the immutable evidence records.
-          </p>
-          {match.resolutionReason && (
-            <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs font-bold p-3 rounded-lg max-w-md mx-auto">
-              Reason: {match.resolutionReason}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* State: DISPUTED */}
-      {match.state === "DISPUTED" && (
-        <div className="bg-pp-surface border border-red-500/50 rounded-2xl p-8 md:p-12 text-center">
-          <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
-            <AlertTriangle size={40} className="text-red-500" />
-          </div>
-          <h2 className="text-3xl font-black text-red-500 mb-2 uppercase">RESULT DISPUTED</h2>
-          <p className="text-pp-text-muted mb-8 max-w-md mx-auto text-sm">
-            Scores submitted by participants or extracted from visual evidence contradicted each other. The market has been locked pending arbiter investigation.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-lg mx-auto text-left mb-6">
-            <div className="bg-pp-bg border border-red-500/30 rounded-xl p-5">
-              <span className="text-xs text-pp-text-muted font-bold block mb-1">Creator Reported:</span>
-              <span className="text-3xl font-black font-mono text-white">{match.p1Score1 ?? "-"} - {match.p1Score2 ?? "-"}</span>
-            </div>
-            <div className="bg-pp-bg border border-red-500/30 rounded-xl p-5">
-              <span className="text-xs text-pp-text-muted font-bold block mb-1">Challenger Reported:</span>
-              <span className="text-3xl font-black font-mono text-white">{match.p2Score1 ?? "-"} - {match.p2Score2 ?? "-"}</span>
-            </div>
-          </div>
-          <p className="text-xs text-red-400 font-bold uppercase">
-            Disputes are resolved in accordance with immutable Storage evidence.
+            {match.resolutionReason ||
+              "The reported match scores or evidence require administrative audit."}
           </p>
         </div>
       )}
 
-      {/* State: START_EVIDENCE_PROCESSING or END_EVIDENCE_PROCESSING */}
-      {(match.state === "START_EVIDENCE_PROCESSING" || match.state === "END_EVIDENCE_PROCESSING") && (
-        <div className="bg-pp-surface border border-pp-primary/30 rounded-2xl p-8 md:p-12 text-center mb-8">
-          <div className="w-16 h-16 bg-pp-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-pp-primary/20">
-            <RefreshCw size={32} className="text-pp-primary animate-spin" />
-          </div>
-          <h2 className="text-2xl font-black text-white mb-2 uppercase">AI PROCESSING EVIDENCE</h2>
-          <p className="text-pp-text-muted text-sm max-w-md mx-auto">
-            Evidence uploaded. The AI abstraction layer is extracting visual facts and hashing the image. Deterministic verification will follow.
-          </p>
-        </div>
-      )}
-
-      {/* Active Evidence Upload Section (When in active pre-match or post-match submission phase) */}
-      {(isStartPhase || isEndPhase) && match.state !== "COMPLETED" && (
-        <div className="space-y-8">
-          <EvidenceUpload
-            matchId={matchId}
-            userId={user.uid}
-            phase={isStartPhase ? "START" : "END"}
-            onSuccess={() => {
-              // Evidence is registered; snapshot updates state in real-time
-            }}
-          />
-
-          {/* Optional Numeric Score Reporting Form for END Phase */}
-          {isEndPhase && (
-            <div className="bg-pp-surface border border-pp-border rounded-2xl p-6 md:p-8">
-              <h3 className="font-bold text-lg text-white mb-2 uppercase">Self-Report Final Score</h3>
+      {/* Main Verification Actions */}
+      {match.state !== "COMPLETED" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* Left: Score Reporting */}
+          <div className="bg-pp-surface border border-pp-border rounded-xl p-6 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-4 border-b border-pp-border pb-3">
+                <ShieldAlert className="text-pp-accent" size={20} />
+                <h3 className="font-bold text-lg text-white uppercase">Self-Report Result</h3>
+              </div>
               <p className="text-xs text-pp-text-muted mb-6">
-                Both players must report the final score. The AI engine will cross-check this against your uploaded screenshot.
+                Enter the final score from your perspective. Both players must report matching scores.
               </p>
 
               {hasSubmittedScore ? (
-                <div className="bg-pp-bg border border-pp-border rounded-xl p-6 text-center">
-                  <span className="text-xs text-pp-text-muted font-bold block mb-1">YOUR REPORTED SCORE</span>
-                  <span className="text-4xl font-black font-mono text-white">
-                    {isCreator ? match.p1Score1 : match.p2Score1} - {isCreator ? match.p1Score2 : match.p2Score2}
-                  </span>
-                  <span className="text-xs text-pp-primary block mt-2 font-bold">Awaiting opponent confirmation and AI verification.</span>
+                <div className="bg-pp-bg border border-pp-border rounded-lg p-6 text-center">
+                  <CheckCircle2 size={32} className="text-pp-primary mx-auto mb-2" />
+                  <h4 className="font-bold text-white mb-1">Score Submitted</h4>
+                  <p className="text-xs text-pp-text-muted">
+                    Your report: Creator {isCreator ? match.p1Score1 : match.p2Score1} -{" "}
+                    {isCreator ? match.p1Score2 : match.p2Score2} Challenger
+                  </p>
                 </div>
               ) : (
-                <form onSubmit={handleScoreSubmit} className="space-y-6">
-                  <div className="flex items-center justify-center gap-4 bg-pp-bg p-6 rounded-xl border border-pp-border">
-                    <div className="text-center">
-                      <label className="text-[10px] text-pp-text-muted font-bold block mb-2 uppercase">Creator</label>
+                <form onSubmit={handleScoreSubmit} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-pp-text-muted uppercase mb-1">
+                        Creator Score
+                      </label>
                       <input
                         type="number"
                         min="0"
                         value={reportedScore1}
-                        onChange={(e) => setReportedScore1(e.target.value ? Number(e.target.value) : "")}
-                        className="w-16 h-16 text-center text-3xl font-black bg-pp-surface border border-pp-primary rounded-lg text-white font-mono"
+                        onChange={(e) =>
+                          setReportedScore1(e.target.value === "" ? "" : Number(e.target.value))
+                        }
                         required
+                        className="w-full bg-pp-bg border border-pp-border rounded-lg p-3 text-white font-mono font-bold text-center text-xl focus:outline-none focus:border-pp-primary"
                       />
                     </div>
-                    <span className="text-2xl font-black text-pp-text-muted mt-5">-</span>
-                    <div className="text-center">
-                      <label className="text-[10px] text-pp-text-muted font-bold block mb-2 uppercase">Challenger</label>
+                    <div>
+                      <label className="block text-xs font-bold text-pp-text-muted uppercase mb-1">
+                        Challenger Score
+                      </label>
                       <input
                         type="number"
                         min="0"
                         value={reportedScore2}
-                        onChange={(e) => setReportedScore2(e.target.value ? Number(e.target.value) : "")}
-                        className="w-16 h-16 text-center text-3xl font-black bg-pp-surface border border-pp-secondary rounded-lg text-white font-mono"
+                        onChange={(e) =>
+                          setReportedScore2(e.target.value === "" ? "" : Number(e.target.value))
+                        }
                         required
+                        className="w-full bg-pp-bg border border-pp-border rounded-lg p-3 text-white font-mono font-bold text-center text-xl focus:outline-none focus:border-pp-primary"
                       />
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    disabled={actionLoading}
-                    className="w-full py-3.5 bg-pp-primary hover:bg-pp-primary-dark text-black font-bold rounded-lg transition-colors text-sm uppercase tracking-wide disabled:opacity-50"
+                    disabled={actionLoading || reportedScore1 === "" || reportedScore2 === ""}
+                    className="w-full py-3 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors uppercase text-sm disabled:opacity-50"
                   >
-                    {actionLoading ? "SUBMITTING SCORE..." : "CONFIRM SCORE REPORT"}
+                    {actionLoading ? "Submitting..." : "Submit Score"}
                   </button>
                 </form>
               )}
             </div>
-          )}
+          </div>
+
+          {/* Right: Anti-Rigging Evidence Upload */}
+          <div className="space-y-6">
+            {isStartPhase && (
+              <EvidenceUpload
+                matchId={matchId}
+                userId={user.id}
+                phase="START"
+                onSuccess={loadMatch}
+              />
+            )}
+
+            {isEndPhase && (
+              <EvidenceUpload
+                matchId={matchId}
+                userId={user.id}
+                phase="END"
+                onSuccess={loadMatch}
+              />
+            )}
+
+            {!isStartPhase && !isEndPhase && (
+              <div className="border border-pp-border rounded-xl p-6 bg-pp-surface text-center text-pp-text-muted text-sm">
+                <Clock className="mx-auto mb-2 text-pp-text-muted" size={24} />
+                Evidence submission is closed for the current state ({match.state}).
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -2,9 +2,8 @@
 
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
-import { Users as UsersIcon, ShieldCheck, Play, ArrowRight, ShieldAlert, Swords } from "lucide-react";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp, onSnapshot, runTransaction, collection, addDoc } from "firebase/firestore";
+import { ShieldCheck, ShieldAlert, Swords } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
 
@@ -51,41 +50,75 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     }
   };
 
-  useEffect(() => {
-    let unsubMatch: any;
-    let unsubMarket: any;
+  const loadData = async () => {
+    try {
+      const { data: matchData } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("id", matchId)
+        .maybeSingle();
 
-    const setupListeners = async () => {
-      try {
-        const docRef = doc(db, "matches", matchId);
-        unsubMatch = onSnapshot(docRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setMatch({ id: docSnap.id, ...docSnap.data() });
-          } else {
-            setMatch(null);
-          }
-          setLoading(false);
+      if (matchData) {
+        setMatch({
+          id: matchData.id,
+          creatorId: matchData.creator_id || matchData.player1_id,
+          player1Id: matchData.player1_id || matchData.creator_id,
+          player2Id: matchData.player2_id,
+          game: matchData.game || "DLS",
+          state: matchData.state || "OPEN",
+          stake: matchData.stake_amount || matchData.stake || 100,
+          ...matchData,
         });
-
-        const marketRef = doc(db, "markets", matchId);
-        unsubMarket = onSnapshot(marketRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setMarket({ id: docSnap.id, ...docSnap.data() });
-          } else {
-            setMarket(null);
-          }
-        });
-      } catch (e) {
-        console.error("Error setting up listeners:", e);
-        setLoading(false);
+      } else {
+        setMatch(null);
       }
-    };
 
-    setupListeners();
+      const { data: marketData } = await supabase
+        .from("markets")
+        .select("*")
+        .eq("id", matchId)
+        .maybeSingle();
+
+      if (marketData) {
+        setMarket({
+          id: marketData.id,
+          totalPool: marketData.total_pool ?? 0,
+          p1Pool: marketData.p1_pool ?? 0,
+          p2Pool: marketData.p2_pool ?? 0,
+          drawPool: marketData.draw_pool ?? 0,
+          status: marketData.status ?? "OPEN",
+          ...marketData,
+        });
+      } else {
+        setMarket(null);
+      }
+    } catch (e) {
+      console.error("Error loading match data:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+
+    // Subscribe to realtime updates
+    const channel = supabase
+      .channel(`match-${matchId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "matches", filter: `id=eq.${matchId}` },
+        () => loadData()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "markets", filter: `id=eq.${matchId}` },
+        () => loadData()
+      )
+      .subscribe();
 
     return () => {
-      if (unsubMatch) unsubMatch();
-      if (unsubMarket) unsubMarket();
+      supabase.removeChannel(channel);
     };
   }, [matchId]);
 
@@ -97,30 +130,34 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     setJoinLoading(true);
     setError("");
     try {
-      if (match.creatorId === user.uid) {
+      if (match.creatorId === user.id) {
         throw new Error("You cannot join your own match.");
       }
       if (match.state !== "OPEN") {
         throw new Error("This match is no longer open.");
       }
 
-      const matchRef = doc(db, "matches", matchId);
-      await updateDoc(matchRef, {
-        player2Id: user.uid,
-        state: "PLAYER_JOINED"
-      });
+      await supabase
+        .from("matches")
+        .update({
+          player2_id: user.id,
+          state: "PLAYER_JOINED",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", matchId);
 
-      const participantRef = doc(db, "match_participants", `${matchId}_${user.uid}`);
-      await setDoc(participantRef, {
-        matchId,
-        userId: user.uid,
+      await supabase.from("match_participants").upsert({
+        id: `${matchId}_${user.id}`,
+        match_id: matchId,
+        user_id: user.id,
         role: "JOINER",
-        joinedAt: serverTimestamp()
+        joined_at: new Date().toISOString(),
       });
 
       const { createMarketAction } = await import("@/app/actions");
       await createMarketAction(matchId);
       
+      await loadData();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -146,8 +183,8 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  const isCreator = user?.uid === match.creatorId;
-  const isJoined = user?.uid === match.player2Id;
+  const isCreator = user?.id === match.creatorId || user?.id === match.player1Id;
+  const isJoined = user?.id === match.player2Id;
   const isOpen = match.state === "OPEN";
 
   return (
@@ -156,8 +193,6 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
       
       {/* Match Header */}
       <div className="bg-pp-surface border border-pp-border rounded-2xl overflow-hidden mb-8 relative">
-        <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://picsum.photos/1200/400')] bg-cover bg-center pointer-events-none"></div>
-        
         <div className="p-4 md:p-8 relative z-10">
           <div className="flex justify-between items-center text-sm font-bold mb-8">
             <span className="bg-white/10 px-3 py-1 rounded text-white uppercase">{match.game}</span>
@@ -170,7 +205,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
           <div className="flex items-center justify-between mb-8">
             <div className="flex flex-col items-center gap-4 w-5/12">
               <div className="w-20 h-20 md:w-28 md:h-28 rounded-full border-4 border-pp-bg bg-pp-bg flex items-center justify-center text-xl font-bold text-pp-text-muted overflow-hidden">
-                {match.player1Id.slice(0, 5)}
+                {match.player1Id ? match.player1Id.slice(0, 5) : "P1"}
               </div>
               <h2 className="text-xl md:text-2xl font-black text-white text-center mt-2">Creator</h2>
             </div>
@@ -223,7 +258,6 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
         {/* Match Details Panel */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-pp-surface border border-pp-border rounded-xl p-8">
@@ -244,7 +278,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
               </div>
               <div>
                 <p className="text-xs text-pp-text-muted font-bold uppercase mb-1">Prize Pool</p>
-                <p className="font-bold text-pp-primary uppercase">{match.stake * 1.9} PTS</p>
+                <p className="font-bold text-pp-primary uppercase">{Math.round(match.stake * 1.9)} PTS</p>
               </div>
             </div>
           </div>
