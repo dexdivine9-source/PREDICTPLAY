@@ -8,10 +8,12 @@ import clsx from "clsx";
 import { useAuth } from "@/components/AuthProvider";
 import { auth } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
+import AuthModal from "@/components/AuthModal";
 
 export default function Navigation() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const { user, wallet } = useAuth();
 
   const desktopLinks = [
@@ -91,7 +93,7 @@ export default function Navigation() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2 pl-2 border-l border-pp-border">
-                  <Link href="/register" className="px-4 py-2 text-sm font-bold bg-pp-primary text-black rounded hover:bg-pp-primary-dark transition-colors">REGISTER</Link>
+                  <button onClick={() => setAuthModalOpen(true)} className="px-4 py-2 text-sm font-bold bg-pp-primary text-black rounded hover:bg-pp-primary-dark transition-colors">REGISTER</button>
                 </div>
               )}
             </div>
@@ -119,6 +121,14 @@ export default function Navigation() {
                     <span className="text-sm font-black font-mono text-white">{wallet?.balance ?? 0}</span>
                   </div>
                 </div>
+              )}
+              {!user && (
+                <button
+                  onClick={() => { setMobileMenuOpen(false); setAuthModalOpen(true); }}
+                  className="block w-full px-3 py-2 text-center rounded-md bg-pp-primary text-black font-bold mb-4"
+                >
+                  REGISTER
+                </button>
               )}
               <Link href="/matches/create" className="block px-3 py-2 text-center rounded-md bg-pp-primary text-black font-bold mb-4">
                 POST CHALLENGE
@@ -175,6 +185,8 @@ export default function Navigation() {
           })}
         </div>
       </div>
+
+      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </>
   );
 }
