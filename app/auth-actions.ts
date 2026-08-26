@@ -50,20 +50,28 @@ export async function sendCodeAction(rawEmail: string): Promise<SendResult> {
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
 
-  await adminDb.collection("email_codes").doc(email).set({
-    codeHash: hashCode(email, code),
-    expiresAt: Date.now() + CODE_TTL_MS,
-    attempts: 0,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  try {
+    await adminDb.collection("email_codes").doc(email).set({
+      codeHash: hashCode(email, code),
+      expiresAt: Date.now() + CODE_TTL_MS,
+      attempts: 0,
+      createdAt: FieldValue.serverTimestamp(),
+    });
 
-  if (STUB_EMAIL_DELIVERY) {
-    console.log(`[auth stub] verification code for ${email}: ${code}`);
-    return { success: true, devCode: code };
+    if (STUB_EMAIL_DELIVERY) {
+      console.log(`[auth stub] verification code for ${email}: ${code}`);
+      return { success: true, devCode: code };
+    }
+
+    await deliverCode(email, code);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[sendCodeAction error]:", err);
+    return { 
+      success: false, 
+      error: err?.message || "Failed to generate verification code. Please check server configuration." 
+    };
   }
-
-  await deliverCode(email, code);
-  return { success: true };
 }
 
 type VerifyResult =
@@ -77,47 +85,55 @@ export async function verifyCodeAction(
   const email = normalizeEmail(rawEmail);
   const code = rawCode.trim();
 
-  const ref = adminDb.collection("email_codes").doc(email);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    return { success: false, error: "No code found for this email. Request a new one." };
-  }
-
-  const data = snap.data()!;
-
-  if (Date.now() > data.expiresAt) {
-    await ref.delete();
-    return { success: false, error: "That code has expired. Request a new one." };
-  }
-
-  if ((data.attempts ?? 0) >= MAX_ATTEMPTS) {
-    await ref.delete();
-    return { success: false, error: "Too many attempts. Request a new code." };
-  }
-
-  if (data.codeHash !== hashCode(email, code)) {
-    await ref.update({ attempts: FieldValue.increment(1) });
-    return { success: false, error: "Incorrect code. Please try again." };
-  }
-
-  // Correct — consume the code so it can't be reused.
-  await ref.delete();
-
-  // Find the existing auth user, or create one for a first-time email.
-  let uid: string;
   try {
-    uid = (await adminAuth.getUserByEmail(email)).uid;
-  } catch {
-    uid = (await adminAuth.createUser({ email })).uid;
+    const ref = adminDb.collection("email_codes").doc(email);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return { success: false, error: "No code found for this email. Request a new one." };
+    }
+
+    const data = snap.data()!;
+
+    if (Date.now() > data.expiresAt) {
+      await ref.delete();
+      return { success: false, error: "That code has expired. Request a new one." };
+    }
+
+    if ((data.attempts ?? 0) >= MAX_ATTEMPTS) {
+      await ref.delete();
+      return { success: false, error: "Too many attempts. Request a new code." };
+    }
+
+    if (data.codeHash !== hashCode(email, code)) {
+      await ref.update({ attempts: FieldValue.increment(1) });
+      return { success: false, error: "Incorrect code. Please try again." };
+    }
+
+    // Correct — consume the code so it can't be reused.
+    await ref.delete();
+
+    // Find the existing auth user, or create one for a first-time email.
+    let uid: string;
+    try {
+      uid = (await adminAuth.getUserByEmail(email)).uid;
+    } catch {
+      uid = (await adminAuth.createUser({ email })).uid;
+    }
+
+    // "New user" for routing = signed in but hasn't completed a game profile yet.
+    const hasProfile = (
+      await adminDb.collection("player_profiles").doc(uid).get()
+    ).exists;
+
+    // Client exchanges this for a real session via signInWithCustomToken().
+    const token = await adminAuth.createCustomToken(uid);
+
+    return { success: true, token, hasProfile };
+  } catch (err: any) {
+    console.error("[verifyCodeAction error]:", err);
+    return {
+      success: false,
+      error: err?.message || "Failed to verify code. Please try again.",
+    };
   }
-
-  // "New user" for routing = signed in but hasn't completed a game profile yet.
-  const hasProfile = (
-    await adminDb.collection("player_profiles").doc(uid).get()
-  ).exists;
-
-  // Client exchanges this for a real session via signInWithCustomToken().
-  const token = await adminAuth.createCustomToken(uid);
-
-  return { success: true, token, hasProfile };
 }
