@@ -233,6 +233,51 @@ CREATE TRIGGER enforce_role_change_admin_only
 --     above is the enforcement point; `anon` cannot write these rows at all.
 
 -- =========================================================================
+-- 6. ADMIN-CURATED MATCHES & YES/NO MARKETS & NOTIFICATIONS
+-- =========================================================================
+
+-- 6a. Add is_admin_match, scheduled_start_time, and question to matches
+ALTER TABLE public.matches
+  ADD COLUMN IF NOT EXISTS is_admin_match BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS scheduled_start_time TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS question TEXT;
+
+-- 6b. Add market_type, question, yes_pool, no_pool to markets
+ALTER TABLE public.markets
+  ADD COLUMN IF NOT EXISTS market_type TEXT DEFAULT 'P1_P2_DRAW',
+  ADD COLUMN IF NOT EXISTS question TEXT,
+  ADD COLUMN IF NOT EXISTS yes_pool INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS no_pool INTEGER DEFAULT 0;
+
+-- 6c. Create notifications table for match announcements and alerts
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  type         TEXT NOT NULL, -- e.g. 'ADMIN_MATCH_LIVE', 'MATCH_UPDATE'
+  title        TEXT,
+  message      TEXT,
+  reference_id TEXT,
+  is_read      BOOLEAN DEFAULT false,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read own notifications or global announcements" ON public.notifications;
+CREATE POLICY "Users can read own notifications or global announcements"
+  ON public.notifications FOR SELECT
+  USING (auth.uid() = user_id OR user_id IS NULL OR public.is_admin());
+
+DROP POLICY IF EXISTS "Authenticated users or admin insert notifications" ON public.notifications;
+CREATE POLICY "Authenticated users or admin insert notifications"
+  ON public.notifications FOR INSERT
+  WITH CHECK (auth.uid() IS NOT NULL OR public.is_admin());
+
+DROP POLICY IF EXISTS "Users can mark own notifications read" ON public.notifications;
+CREATE POLICY "Users can mark own notifications read"
+  ON public.notifications FOR UPDATE
+  USING (auth.uid() = user_id OR public.is_admin());
+
+-- =========================================================================
 -- BOOTSTRAPPING INSTRUCTIONS:
 -- To bootstrap your first admin account:
 -- 1. Open Supabase Dashboard -> Table Editor -> `player_profiles` table.
@@ -241,3 +286,4 @@ CREATE TRIGGER enforce_role_change_admin_only
 -- NOTE: This still works with the section-5 trigger in place — Dashboard/SQL
 --       Editor edits run with no auth.uid(), which the guard lets through.
 -- =========================================================================
+
