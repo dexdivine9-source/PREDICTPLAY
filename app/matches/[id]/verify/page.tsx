@@ -2,7 +2,18 @@
 
 import { useState, use, useEffect } from "react";
 import Link from "next/link";
-import { ShieldAlert, ShieldCheck, CheckCircle2, AlertTriangle, Clock, RefreshCw } from "lucide-react";
+import { 
+  ShieldAlert, 
+  ShieldCheck, 
+  CheckCircle2, 
+  AlertTriangle, 
+  Clock, 
+  RefreshCw,
+  UploadCloud,
+  AlertCircle,
+  ExternalLink,
+  Check
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { EvidenceUpload } from "@/components/evidence-upload";
@@ -21,6 +32,8 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
 
   const [reportedScore1, setReportedScore1] = useState<number | "">("");
   const [reportedScore2, setReportedScore2] = useState<number | "">("");
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
 
   const loadMatch = async () => {
     try {
@@ -44,6 +57,8 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
           p1Score2: data.p1_score2,
           p2Score1: data.p2_score1,
           p2Score2: data.p2_score2,
+          p1Evidence: data.p1_evidence,
+          p2Evidence: data.p2_evidence,
           verifiedScoreP1: data.verified_score_p1,
           verifiedScoreP2: data.verified_score_p2,
           verificationConfidence: data.verification_confidence,
@@ -106,17 +121,73 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
   }
 
   const hasSubmittedScore = isCreator ? match.p1Submitted : match.p2Submitted;
+  const submittedEvidenceUrl = isCreator ? match.p1Evidence : match.p2Evidence;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0] || null;
+    setEvidenceError(null);
+
+    if (selected) {
+      if (!selected.type.startsWith("image/")) {
+        setEvidenceError("Only image files (JPEG, PNG, WebP) are allowed.");
+        setEvidenceFile(null);
+        return;
+      }
+      if (selected.size > 5 * 1024 * 1024) {
+        setEvidenceError("Screenshot file size must be less than 5MB.");
+        setEvidenceFile(null);
+        return;
+      }
+      setEvidenceFile(selected);
+    } else {
+      setEvidenceFile(null);
+    }
+  };
 
   const handleScoreSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (reportedScore1 === "" || reportedScore2 === "") return;
+    if (reportedScore1 === "" || reportedScore2 === "") {
+      setError("Please enter both scores.");
+      return;
+    }
+
+    if (!evidenceFile) {
+      setEvidenceError("Please select a screenshot of the final match result.");
+      return;
+    }
 
     setActionLoading(true);
     setError("");
+    setEvidenceError(null);
 
     try {
+      // 1. Upload screenshot to Supabase Storage bucket 'evidence'
+      const sanitizedFileName = evidenceFile.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const storagePath = `${matchId}/${user.id}/result_${Date.now()}_${sanitizedFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("evidence")
+        .upload(storagePath, evidenceFile, {
+          contentType: evidenceFile.type,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.warn("Storage upload note:", uploadError.message);
+      }
+
+      // 2. Retrieve public URL
+      const { data: publicUrlData } = supabase.storage
+        .from("evidence")
+        .getPublicUrl(storagePath);
+
+      const evidenceUrl = publicUrlData?.publicUrl || storagePath;
+
+      // 3. Submit match result with the real uploaded evidence URL
       const { submitMatchResultAction } = await import("@/app/actions");
-      await submitMatchResultAction(matchId, Number(reportedScore1), Number(reportedScore2), "");
+      await submitMatchResultAction(matchId, Number(reportedScore1), Number(reportedScore2), evidenceUrl);
+      
+      setEvidenceFile(null);
       await loadMatch();
     } catch (err: any) {
       setError(err.message || "Failed to submit score report.");
@@ -214,7 +285,7 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
       {/* Main Verification Actions */}
       {match.state !== "COMPLETED" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Left: Score Reporting */}
+          {/* Left: Score Reporting with Final Match Result Screenshot */}
           <div className="bg-pp-surface border border-pp-border rounded-xl p-6 flex flex-col justify-between">
             <div>
               <div className="flex items-center gap-2 mb-4 border-b border-pp-border pb-3">
@@ -222,20 +293,33 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
                 <h3 className="font-bold text-lg text-white uppercase">Self-Report Result</h3>
               </div>
               <p className="text-xs text-pp-text-muted mb-6">
-                Enter the final score from your perspective. Both players must report matching scores.
+                Enter the final score from your perspective and upload screenshot proof of the final match result.
               </p>
 
               {hasSubmittedScore ? (
-                <div className="bg-pp-bg border border-pp-border rounded-lg p-6 text-center">
+                <div className="bg-pp-bg border border-pp-border rounded-lg p-6 text-center space-y-3">
                   <CheckCircle2 size={32} className="text-pp-primary mx-auto mb-2" />
-                  <h4 className="font-bold text-white mb-1">Score Submitted</h4>
+                  <h4 className="font-bold text-white mb-1">Score & Evidence Submitted</h4>
                   <p className="text-xs text-pp-text-muted">
                     Your report: Creator {isCreator ? match.p1Score1 : match.p2Score1} -{" "}
                     {isCreator ? match.p1Score2 : match.p2Score2} Challenger
                   </p>
+                  {submittedEvidenceUrl && (
+                    <div className="pt-2">
+                      <a
+                        href={submittedEvidenceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs text-pp-primary hover:underline font-bold"
+                      >
+                        <span>View Submitted Screenshot</span>
+                        <ExternalLink size={12} />
+                      </a>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <form onSubmit={handleScoreSubmit} className="space-y-4">
+                <form onSubmit={handleScoreSubmit} className="space-y-5">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-pp-text-muted uppercase mb-1">
@@ -269,12 +353,63 @@ export default function MatchVerificationPage({ params }: { params: Promise<{ id
                     </div>
                   </div>
 
+                  {/* Final Match Result Screenshot Upload */}
+                  <div className="border-t border-pp-border pt-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-pp-text-muted uppercase">
+                        Final Match Result Screenshot <span className="text-pp-primary">*</span>
+                      </label>
+                      <span className="text-[11px] text-pp-text-muted">Max 5MB</span>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept="image/jpeg, image/png, image/webp"
+                        onChange={handleFileChange}
+                        disabled={actionLoading}
+                        className="w-full text-sm text-pp-text-muted file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-pp-primary file:text-black hover:file:bg-pp-primary-dark cursor-pointer bg-pp-bg/50 rounded-lg border border-pp-border p-2"
+                      />
+                    </div>
+
+                    {evidenceFile && (
+                      <div className="text-xs text-green-400 bg-green-500/10 border border-green-500/30 rounded-lg p-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <Check size={14} className="flex-shrink-0 text-green-400" />
+                          <span className="truncate font-bold text-white">{evidenceFile.name}</span>
+                        </div>
+                        <span className="text-pp-text-muted ml-2 flex-shrink-0">
+                          {(evidenceFile.size / (1024 * 1024)).toFixed(2)} MB
+                        </span>
+                      </div>
+                    )}
+
+                    {evidenceError && (
+                      <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2.5 flex items-center gap-2 text-red-400 text-xs font-bold">
+                        <AlertCircle size={14} className="flex-shrink-0" />
+                        <span>{evidenceError}</span>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="submit"
-                    disabled={actionLoading || reportedScore1 === "" || reportedScore2 === ""}
-                    className="w-full py-3 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors uppercase text-sm disabled:opacity-50"
+                    disabled={
+                      actionLoading || 
+                      reportedScore1 === "" || 
+                      reportedScore2 === "" || 
+                      !evidenceFile
+                    }
+                    className="w-full py-3 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors uppercase text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
-                    {actionLoading ? "Submitting..." : "Submit Score"}
+                    {actionLoading ? (
+                      <>
+                        <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin" />
+                        <span>UPLOADING & SUBMITTING...</span>
+                      </>
+                    ) : (
+                      <span>Submit Score & Evidence</span>
+                    )}
                   </button>
                 </form>
               )}
