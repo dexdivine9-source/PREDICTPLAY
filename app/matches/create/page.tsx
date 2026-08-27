@@ -18,7 +18,10 @@ export default function CreateMatchPage() {
   const [error, setError] = useState("");
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
-  
+  const [submitting, setSubmitting] = useState(false);
+
+  const isAdmin = profile?.role === "admin" || profile?.is_admin === true;
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) {
@@ -26,7 +29,9 @@ export default function CreateMatchPage() {
       return;
     }
 
-    if (!profile?.is_verified) {
+    // ADMIN/DEV BYPASS — for testing purposes:
+    // Admins can create matches even without profile verification.
+    if (!isAdmin && !profile?.is_verified) {
       setShowVerifyModal(true);
       return;
     }
@@ -36,27 +41,24 @@ export default function CreateMatchPage() {
       return;
     }
 
+    setSubmitting(true);
+    setError("");
+
     try {
-      const { data, error: insertError } = await supabase
-        .from("matches")
-        .insert({
-          creator_id: user.id,
-          player1_id: user.id,
-          game: "DLS",
-          stake_amount: Number(stake),
-          state: "OPEN",
-          created_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
+      const { createMatchAction } = await import("@/app/actions");
+      const res = await createMatchAction({
+        game: "DLS",
+        stakeAmount: Number(stake),
+      });
 
-      if (insertError) throw insertError;
-
-      const createdId = data.id;
-      setMatchId(createdId);
-      setCreated(true);
+      if (res?.matchId) {
+        setMatchId(res.matchId);
+        setCreated(true);
+      }
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Failed to create match");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -158,8 +160,12 @@ export default function CreateMatchPage() {
           </div>
         </div>
 
-        <button type="submit" className="w-full py-4 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors mt-4 text-lg">
-          CREATE MATCH
+        <button 
+          type="submit" 
+          disabled={submitting}
+          className="w-full py-4 bg-pp-primary text-black font-bold rounded-lg hover:bg-pp-primary-dark transition-colors mt-4 text-lg disabled:opacity-50"
+        >
+          {submitting ? "CREATING MATCH..." : "CREATE MATCH"}
         </button>
       </form>
 

@@ -32,7 +32,11 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     e.preventDefault();
     if (!user) return;
 
-    if (!profile?.is_verified) {
+    const isAdmin = profile?.role === "admin" || profile?.is_admin === true;
+
+    // ADMIN/DEV BYPASS — for testing purposes:
+    // Admins are exempt from the profile verification requirement when predicting.
+    if (!isAdmin && !profile?.is_verified) {
       setVerifyModalAction("place predictions");
       setShowVerifyModal(true);
       return;
