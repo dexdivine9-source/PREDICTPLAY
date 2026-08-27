@@ -51,6 +51,11 @@ export default function CreateMatchPage() {
         stakeAmount: Number(stake),
       });
 
+      if (!res.success) {
+        setError(res.error || "Failed to create match");
+        return;
+      }
+
       if (res?.matchId) {
         setMatchId(res.matchId);
         setCreated(true);

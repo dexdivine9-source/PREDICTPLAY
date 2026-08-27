@@ -53,7 +53,11 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
 
     try {
       const { placePredictionAction } = await import("@/app/actions");
-      await placePredictionAction(matchId, predictOutcome, amountNum);
+      const res = await placePredictionAction(matchId, predictOutcome, amountNum);
+      if (!res.success) {
+        setError(res.error || "Failed to place prediction");
+        return;
+      }
       
       await refreshProfile();
       setPredictAmount("");
