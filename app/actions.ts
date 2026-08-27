@@ -558,5 +558,3 @@ export async function settleMarket(matchId: string, winningOutcome: string) {
     .eq("id", matchId);
 }
 
-export { joinAdminMatchByCodeAction, loadMatchByCodeAction } from "@/app/admin-actions";
-
