@@ -18,12 +18,32 @@ export async function createWalletAction() {
     return;
   }
 
+  // Create wallet with 1000-point signup bonus (fires once per user)
   await supabase.from("virtual_wallets").insert({
     user_id: userId,
     balance: 1000,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   });
+
+  // Log the SIGNUP_BONUS in transactions and stamp the idempotency flag.
+  // Non-fatal: a logging failure must not break account creation.
+  try {
+    await supabase.from("transactions").insert({
+      user_id: userId,
+      amount: 1000,
+      type: "SIGNUP_BONUS",
+      reference_id: userId,
+      created_at: new Date().toISOString(),
+    });
+
+    await supabase
+      .from("player_profiles")
+      .update({ signup_bonus_granted: true, updated_at: new Date().toISOString() })
+      .eq("id", userId);
+  } catch (err) {
+    console.error("SIGNUP_BONUS log/flag failed (non-fatal):", err);
+  }
 }
 
 export async function createMarketAction(matchId: string) {

@@ -222,6 +222,50 @@ export async function adminApproveVerificationAction(targetUserId: string) {
     throw new Error(profileError.message);
   }
 
+  // VERIFICATION_BONUS: +1500 points, awarded once when is_verified first flips
+  // to true. Guard via verification_bonus_granted so re-approving never
+  // double-credits. Non-fatal — a wallet error must not block admin approval.
+  try {
+    const { data: profileRow } = await supabase
+      .from("player_profiles")
+      .select("verification_bonus_granted")
+      .eq("id", targetUserId)
+      .maybeSingle();
+
+    if (!profileRow?.verification_bonus_granted) {
+      const { data: wallet } = await supabase
+        .from("virtual_wallets")
+        .select("balance")
+        .eq("user_id", targetUserId)
+        .maybeSingle();
+
+      if (wallet) {
+        await supabase
+          .from("virtual_wallets")
+          .update({
+            balance: (wallet.balance || 0) + 1500,
+            updated_at: now,
+          })
+          .eq("user_id", targetUserId);
+      }
+
+      await supabase.from("transactions").insert({
+        user_id: targetUserId,
+        amount: 1500,
+        type: "VERIFICATION_BONUS",
+        reference_id: targetUserId,
+        created_at: now,
+      });
+
+      await supabase
+        .from("player_profiles")
+        .update({ verification_bonus_granted: true, updated_at: now })
+        .eq("id", targetUserId);
+    }
+  } catch (err) {
+    console.error("VERIFICATION_BONUS credit failed (non-fatal):", err);
+  }
+
   // 2. Also update player_verification if it exists
   try {
     await supabase

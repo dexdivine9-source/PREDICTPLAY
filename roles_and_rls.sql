@@ -26,6 +26,14 @@ END $$;
 -- Ensure all rows default to 'player' if NULL
 UPDATE player_profiles SET role = 'player' WHERE role IS NULL;
 
+-- Idempotency flags for the points bonus system (added with the bonus feature).
+-- signup_bonus_granted:       set true after the 1000-pt wallet creation bonus is logged.
+-- verification_bonus_granted: set true after the 1500-pt verification bonus is credited.
+-- Both default false so existing rows are safe (they will be credited on next trigger).
+ALTER TABLE public.player_profiles
+  ADD COLUMN IF NOT EXISTS signup_bonus_granted       BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS verification_bonus_granted BOOLEAN DEFAULT false;
+
 -- 2. Helper function to check if the current user is an admin
 -- SECURITY: `SET search_path = ''` pins schema resolution so that a malicious
 -- object planted in another schema cannot hijack this SECURITY DEFINER
