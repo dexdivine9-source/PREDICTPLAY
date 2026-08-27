@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PlaySquare, Users as UsersIcon, ArrowRight, ShieldCheck, Gamepad2, Plus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import ComingSoonModal from "@/components/ComingSoonModal";
+import MatchCodeWidget from "@/components/MatchCodeWidget";
 
 interface MarketMatch {
   id: string;
@@ -44,19 +45,26 @@ export default function MarketsPage() {
           .from("matches")
           .select("*, markets(*)")
           .eq("is_admin_match", true)
-          .in("state", ["OPEN", "IN_PROGRESS", "ADMIN_SCHEDULED"])
+          .in("state", ["OPEN", "IN_PROGRESS", "ADMIN_SCHEDULED", "AWAITING_PLAYERS"])
           .order("created_at", { ascending: false })
           .limit(10);
 
-        if (adminData) {
-          // Fetch player names for admin matches
-          const userIds = Array.from(new Set(adminData.flatMap((m) => [m.player1_id, m.player2_id]).filter(Boolean)));
-          const { data: playerProfiles } = await supabase
+        if (adminData && adminData.length > 0) {
+          const userIds = new Set<string>();
+          adminData.forEach((m: any) => {
+            if (m.player1_id) userIds.add(m.player1_id);
+            if (m.player2_id) userIds.add(m.player2_id);
+          });
+
+          const { data: profiles } = await supabase
             .from("player_profiles")
             .select("id, username, gamertag")
-            .in("id", userIds);
+            .in("id", Array.from(userIds));
 
-          const profileMap = new Map((playerProfiles || []).map((p) => [p.id, p.gamertag || p.username || "Player"]));
+          const profileMap = new Map<string, string>();
+          (profiles || []).forEach((p: any) => {
+            profileMap.set(p.id, p.gamertag || p.username || "Player");
+          });
 
           const parsedAdminMatches: LiveAdminMatch[] = adminData.map((item: any) => {
             const market = Array.isArray(item.markets) ? item.markets[0] : item.markets;
@@ -138,13 +146,29 @@ export default function MarketsPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
+      <div className="mb-8 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="lg:col-span-2">
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-3">
             <PlaySquare className="text-pp-accent" size={32} />
             PREDICT HUB
           </h1>
-          <p className="text-pp-text-muted mt-2">Watch verified matches and predict outcomes in real-time.</p>
+          <p className="text-pp-text-muted mt-2 mb-6">
+            Watch verified competitive matches and participate in real-time prediction markets.
+          </p>
+
+          <div className="bg-pp-surface border border-pp-border rounded-2xl p-4 flex items-start gap-3">
+            <ShieldCheck className="text-pp-primary flex-shrink-0 mt-0.5" size={20} />
+            <p className="text-xs text-pp-text-muted leading-relaxed">
+              Predict on match outcomes with virtual points. Winners receive immediate proportional payouts from the prize pool as soon as match results are confirmed.
+            </p>
+          </div>
+        </div>
+
+        <div className="lg:col-span-1">
+          <MatchCodeWidget
+            title="QUICK LOAD BY CODE"
+            subtitle="Have a match code? Enter it below to join or predict."
+          />
         </div>
       </div>
 

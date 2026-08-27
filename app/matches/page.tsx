@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
 import ComingSoonModal from "@/components/ComingSoonModal";
+import MatchCodeWidget from "@/components/MatchCodeWidget";
 
 export default function MatchesPage() {
   const { user } = useAuth();
@@ -84,11 +85,28 @@ export default function MatchesPage() {
         </Link>
       </div>
 
-      <div className="bg-pp-bg border border-pp-border rounded-xl p-4 mb-8 flex items-start gap-4">
-        <ShieldAlert className="text-pp-secondary flex-shrink-0 mt-1" size={24} />
-        <div>
-          <h4 className="text-white font-bold text-sm">Trust & Reputation System Active</h4>
-          <p className="text-pp-text-muted text-xs mt-1">Accepting a match requires you to submit honest screenshot evidence. Disputed or manipulated reports permanently affect Reputation.</p>
+      {/* Booking Code Widget & Trust Banner Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 items-start">
+        <div className="lg:col-span-1">
+          <MatchCodeWidget
+            title="HAVE A MATCH CODE?"
+            subtitle="Enter your match booking code below to load and join."
+          />
+        </div>
+
+        <div className="lg:col-span-2 bg-pp-bg border border-pp-border rounded-2xl p-6 flex items-start gap-4 h-full">
+          <ShieldAlert className="text-pp-secondary flex-shrink-0 mt-1" size={28} />
+          <div>
+            <h4 className="text-white font-bold text-base mb-1">Trust & Verification System</h4>
+            <p className="text-pp-text-muted text-xs leading-relaxed mb-3">
+              All matches on PredictPlay are protected by our cryptographic escrow and automated screenshot evidence verification. Ensure you capture the final match result screen.
+            </p>
+            <div className="flex flex-wrap gap-3 text-[11px] font-mono text-pp-text-muted">
+              <span className="px-2 py-1 bg-pp-surface rounded border border-pp-border text-white">⚡ Instant Payouts</span>
+              <span className="px-2 py-1 bg-pp-surface rounded border border-pp-border text-white">🔒 Escrow Protected</span>
+              <span className="px-2 py-1 bg-pp-surface rounded border border-pp-border text-white">🏆 Reputation Tracking</span>
+            </div>
+          </div>
         </div>
       </div>
 

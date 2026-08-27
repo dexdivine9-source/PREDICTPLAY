@@ -12,11 +12,16 @@ import {
   Users, 
   CheckCircle2, 
   XCircle,
-  AlertCircle
+  AlertCircle,
+  KeyRound,
+  Copy,
+  Check,
+  UserPlus
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
+import { joinAdminMatchByCodeAction } from "@/app/admin-actions";
 import VerificationRequiredModal from "@/components/VerificationRequiredModal";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +39,8 @@ export default function LiveMatchPage({ params }: { params: Promise<{ id: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [joiningSlot, setJoiningSlot] = useState(false);
 
   const [predictOutcome, setPredictOutcome] = useState<"yes" | "no">("yes");
   const [predictAmount, setPredictAmount] = useState<string>("100");
@@ -52,14 +59,20 @@ export default function LiveMatchPage({ params }: { params: Promise<{ id: string
         setMatch(matchData);
 
         // Fetch player profiles
-        const { data: players } = await supabase
-          .from("player_profiles")
-          .select("id, username, gamertag, reputation, game")
-          .in("id", [matchData.player1_id, matchData.player2_id]);
+        const playerIds = [matchData.player1_id, matchData.player2_id].filter(Boolean);
+        if (playerIds.length > 0) {
+          const { data: players } = await supabase
+            .from("player_profiles")
+            .select("id, username, gamertag, reputation, game")
+            .in("id", playerIds);
 
-        if (players) {
-          setP1Profile(players.find((p) => p.id === matchData.player1_id));
-          setP2Profile(players.find((p) => p.id === matchData.player2_id));
+          if (players) {
+            setP1Profile(players.find((p) => p.id === matchData.player1_id) || null);
+            setP2Profile(players.find((p) => p.id === matchData.player2_id) || null);
+          }
+        } else {
+          setP1Profile(null);
+          setP2Profile(null);
         }
       } else {
         setMatch(null);
@@ -103,6 +116,46 @@ export default function LiveMatchPage({ params }: { params: Promise<{ id: string
       supabase.removeChannel(channel);
     };
   }, [matchId]);
+
+  const handleCopyCode = () => {
+    if (match?.match_code) {
+      navigator.clipboard.writeText(match.match_code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleClaimSlot = async () => {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    const isAdmin = profile?.role === "admin" || profile?.is_admin === true;
+    if (!isAdmin && !profile?.is_verified) {
+      setShowVerifyModal(true);
+      return;
+    }
+
+    setJoiningSlot(true);
+    setError("");
+
+    try {
+      const codeToUse = match?.match_code || matchId;
+      const res = await joinAdminMatchByCodeAction(codeToUse);
+      if (!res.success) {
+        setError(res.error || "Failed to claim player slot.");
+        return;
+      }
+      setSuccessMessage("You have joined this match as a player!");
+      await loadData();
+      await refreshProfile();
+    } catch (err: any) {
+      setError(err?.message || "Failed to claim slot.");
+    } finally {
+      setJoiningSlot(false);
+    }
+  };
 
   const handlePredict = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,10 +232,13 @@ export default function LiveMatchPage({ params }: { params: Promise<{ id: string
   const yesPercent = totalPool > 0 ? Math.round((yesPool / totalPool) * 100) : 50;
   const noPercent = totalPool > 0 ? Math.round((noPool / totalPool) * 100) : 50;
 
-  const p1Name = p1Profile?.gamertag || p1Profile?.username || "Player 1";
-  const p2Name = p2Profile?.gamertag || p2Profile?.username || "Player 2";
+  const isAwaitingPlayers = match?.state === "AWAITING_PLAYERS" || !match?.player1_id || !match?.player2_id;
+  const p1Name = p1Profile?.gamertag || p1Profile?.username || (match?.player1_id ? "Player 1" : "Awaiting Player 1");
+  const p2Name = p2Profile?.gamertag || p2Profile?.username || (match?.player2_id ? "Player 2" : "Awaiting Player 2");
   const question = market?.question || match?.question || `Will ${p1Name} defeat ${p2Name}?`;
 
+  const isUserInMatch = user && (match?.player1_id === user.id || match?.player2_id === user.id);
+  const canClaimSlot = user && !isUserInMatch && isAwaitingPlayers;
   const isMarketOpen = market?.status === "OPEN";
 
   return (
@@ -197,11 +253,65 @@ export default function LiveMatchPage({ params }: { params: Promise<{ id: string
           <span>Back to Markets</span>
         </Link>
 
-        <span className="inline-flex items-center gap-2 px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/30 rounded-full text-xs font-black uppercase tracking-wider">
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          Live Curated Match
-        </span>
+        <div className="flex items-center gap-2">
+          {isAwaitingPlayers ? (
+            <span className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full text-xs font-black uppercase tracking-wider">
+              <Clock size={14} className="animate-spin text-amber-400" />
+              Awaiting Competitors
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2 px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/30 rounded-full text-xs font-black uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              Live Curated Match
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Booking Code Banner if match has match_code and awaiting players */}
+      {isAwaitingPlayers && (
+        <div className="mb-8 p-6 bg-pp-surface border-2 border-amber-500/40 rounded-3xl relative overflow-hidden shadow-xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider mb-1">
+                <KeyRound size={16} />
+                <span>Code-Based Matchmaking</span>
+              </div>
+              <h2 className="text-xl font-black text-white uppercase">
+                {match?.match_code ? `Booking Code: ${match.match_code}` : "Awaiting Players"}
+              </h2>
+              <p className="text-xs text-pp-text-muted mt-1">
+                Slots filled: {match?.player1_id ? "1/2" : "0/2"}. Share this code or click below to enter.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {match?.match_code && (
+                <button
+                  type="button"
+                  onClick={handleCopyCode}
+                  className="px-4 py-2.5 bg-pp-bg hover:bg-pp-surface rounded-xl border border-pp-border text-xs font-bold text-white flex items-center gap-2 transition-colors"
+                >
+                  {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                  <span>{copied ? "COPIED CODE" : "COPY CODE"}</span>
+                </button>
+              )}
+
+              {canClaimSlot && (
+                <button
+                  type="button"
+                  onClick={handleClaimSlot}
+                  disabled={joiningSlot}
+                  className="px-5 py-2.5 bg-pp-primary text-black font-extrabold rounded-xl text-xs uppercase tracking-wider hover:bg-pp-primary-dark transition-all flex items-center gap-2 shadow-md shadow-pp-primary/20"
+                >
+                  <UserPlus size={14} />
+                  <span>{joiningSlot ? "JOINING..." : "CLAIM PLAYER SLOT"}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Banner Card */}
       <div className="bg-pp-surface border border-pp-primary/30 rounded-3xl p-6 md:p-10 mb-8 relative overflow-hidden shadow-2xl">

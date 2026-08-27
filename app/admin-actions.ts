@@ -450,13 +450,22 @@ export async function updateUserRoleAction(
   return { success: true, targetUserId, newRole };
 }
 
+function generateMatchCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 export async function createAdminMatchAction(data: {
-  player1Id: string;
-  player2Id: string;
+  player1Id?: string;
+  player2Id?: string;
   game?: string;
   scheduledStartTime?: string;
   question?: string;
-}): Promise<{ success: boolean; matchId?: string; error?: string }> {
+}): Promise<{ success: boolean; matchId?: string; matchCode?: string; error?: string }> {
   try {
     const user = await getAuthUser();
     if (!user.admin) {
@@ -466,47 +475,85 @@ export async function createAdminMatchAction(data: {
     const { player1Id, player2Id, scheduledStartTime } = data;
     const game = (data.game || "DLS").toUpperCase();
 
-    if (!player1Id || !player2Id) {
-      return { success: false, error: "Both Player 1 and Player 2 must be selected." };
-    }
+    // Mode A: Both players provided directly
+    const isModeA = Boolean(player1Id && player2Id);
 
-    if (player1Id === player2Id) {
+    if (isModeA && player1Id === player2Id) {
       return { success: false, error: "Player 1 and Player 2 must be different players." };
     }
 
     const supabase = await createClient();
     const now = new Date().toISOString();
 
-    // Fetch both player profiles
-    const { data: players, error: playersError } = await supabase
-      .from("player_profiles")
-      .select("id, username, gamertag")
-      .in("id", [player1Id, player2Id]);
+    let p1Id: string | null = player1Id || null;
+    let p2Id: string | null = player2Id || null;
+    let p1Name = "Player 1";
+    let p2Name = "Player 2";
+    let matchCode: string | null = null;
 
-    if (playersError || !players || players.length < 2) {
-      return { success: false, error: "Could not find profile details for both selected players." };
+    if (isModeA) {
+      // Fetch both player profiles
+      const { data: players, error: playersError } = await supabase
+        .from("player_profiles")
+        .select("id, username, gamertag")
+        .in("id", [player1Id!, player2Id!]);
+
+      if (playersError || !players || players.length < 2) {
+        return { success: false, error: "Could not find profile details for both selected players." };
+      }
+
+      const p1 = players.find((p) => p.id === player1Id);
+      const p2 = players.find((p) => p.id === player2Id);
+
+      p1Name = p1?.gamertag || p1?.username || "Player 1";
+      p2Name = p2?.gamertag || p2?.username || "Player 2";
+    } else {
+      // Mode B: Generate booking code for players to join
+      matchCode = generateMatchCode();
+
+      // Normalize if only 1 player was selected in slot 2
+      if (!p1Id && p2Id) {
+        p1Id = p2Id;
+        p2Id = null;
+      }
+
+      if (p1Id) {
+        const { data: p1Profile } = await supabase
+          .from("player_profiles")
+          .select("id, username, gamertag")
+          .eq("id", p1Id)
+          .maybeSingle();
+
+        if (p1Profile) {
+          p1Name = p1Profile.gamertag || p1Profile.username || "Player 1";
+        }
+      }
     }
 
-    const p1 = players.find((p) => p.id === player1Id);
-    const p2 = players.find((p) => p.id === player2Id);
+    let defaultQuestion = `Will ${p1Name} defeat ${p2Name}?`;
+    if (!isModeA) {
+      if (p1Id) {
+        defaultQuestion = `Will ${p1Name} win this match?`;
+      } else {
+        defaultQuestion = `Will Player 1 defeat Player 2 in this match?`;
+      }
+    }
 
-    const p1Name = p1?.gamertag || p1?.username || "Player 1";
-    const p2Name = p2?.gamertag || p2?.username || "Player 2";
-
-    const defaultQuestion = `Will ${p1Name} defeat ${p2Name}?`;
     const finalQuestion = data.question?.trim() || defaultQuestion;
+    const matchState = isModeA ? "OPEN" : "AWAITING_PLAYERS";
 
     // 1. Insert into matches table
     const { data: match, error: matchError } = await supabase
       .from("matches")
       .insert({
         creator_id: user.uid,
-        player1_id: player1Id,
-        player2_id: player2Id,
+        player1_id: p1Id,
+        player2_id: p2Id,
         game,
         stake_amount: 0, // No entry fee for curated matches
-        state: "OPEN",
+        state: matchState,
         is_admin_match: true,
+        match_code: matchCode,
         scheduled_start_time: scheduledStartTime ? new Date(scheduledStartTime).toISOString() : null,
         question: finalQuestion,
         created_at: now,
@@ -544,18 +591,20 @@ export async function createAdminMatchAction(data: {
       console.warn("Market insert warning:", marketError);
     }
 
-    // 3. Broadcast notification announcement
-    try {
-      await supabase.from("notifications").insert({
-        type: "ADMIN_MATCH_LIVE",
-        title: "⚡ New Live Curated Match!",
-        message: `${p1Name} vs ${p2Name} is live for predictions! Question: "${finalQuestion}"`,
-        reference_id: match.id,
-        is_read: false,
-        created_at: now,
-      });
-    } catch (notifErr) {
-      console.warn("Notification broadcast note:", notifErr);
+    // 3. Broadcast notification announcement if Mode A (fully assigned)
+    if (isModeA) {
+      try {
+        await supabase.from("notifications").insert({
+          type: "ADMIN_MATCH_LIVE",
+          title: "⚡ New Live Curated Match!",
+          message: `${p1Name} vs ${p2Name} is live for predictions! Question: "${finalQuestion}"`,
+          reference_id: match.id,
+          is_read: false,
+          created_at: now,
+        });
+      } catch (notifErr) {
+        console.warn("Notification broadcast note:", notifErr);
+      }
     }
 
     // 4. Record audit log in admin_actions
@@ -563,15 +612,17 @@ export async function createAdminMatchAction(data: {
       await supabase.from("admin_actions").insert({
         admin_id: user.uid,
         match_id: match.id,
-        action: "ADMIN_MATCH_CREATED",
-        reason: `Admin created curated match: ${p1Name} vs ${p2Name} (${game}) with YES/NO market.`,
+        action: isModeA ? "ADMIN_MATCH_CREATED" : "ADMIN_MATCH_CODE_CREATED",
+        reason: isModeA
+          ? `Admin created curated match: ${p1Name} vs ${p2Name} (${game}) with YES/NO market.`
+          : `Admin created code-based curated match [Code: ${matchCode}] (${game}) with YES/NO market.`,
         created_at: now,
       });
     } catch {
       // Non-fatal audit log
     }
 
-    return { success: true, matchId: match.id };
+    return { success: true, matchId: match.id, matchCode: matchCode || undefined };
   } catch (err: any) {
     console.error("createAdminMatchAction unexpected error:", err);
     return {
@@ -580,6 +631,227 @@ export async function createAdminMatchAction(data: {
     };
   }
 }
+
+export async function joinAdminMatchByCodeAction(
+  code: string
+): Promise<{ success: boolean; matchId?: string; redirectUrl?: string; error?: string }> {
+  try {
+    const user = await getAuthUser();
+    const userId = user.uid;
+
+    if (!code || !code.trim()) {
+      return { success: false, error: "Please enter a valid match code." };
+    }
+
+    const cleanCode = code.trim().toUpperCase();
+    const supabase = await createClient();
+
+    // Check verification status (bypass for admins)
+    const { data: profile } = await supabase
+      .from("player_profiles")
+      .select("is_verified, role, is_admin, gamertag, username")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const isAdmin = user.admin || profile?.role === "admin" || profile?.is_admin === true;
+    if (!isAdmin && (!profile || !profile.is_verified)) {
+      return {
+        success: false,
+        error: "Profile verification required: You must complete profile verification to join matches.",
+      };
+    }
+
+    // Lookup match by match_code OR by exact id OR short prefix
+    const { data: matchesByCode } = await supabase
+      .from("matches")
+      .select("*")
+      .eq("match_code", cleanCode)
+      .limit(1);
+
+    let match = matchesByCode && matchesByCode.length > 0 ? matchesByCode[0] : null;
+
+    if (!match) {
+      const { data: matchesById } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("id", code.trim())
+        .limit(1);
+      match = matchesById && matchesById.length > 0 ? matchesById[0] : null;
+    }
+
+    // Fallback: search by ID prefix (e.g. first 8 characters)
+    if (!match && cleanCode.length >= 6) {
+      const { data: prefixMatches } = await supabase
+        .from("matches")
+        .select("*")
+        .ilike("id", `${code.trim()}%`)
+        .limit(1);
+      if (prefixMatches && prefixMatches.length > 0) {
+        match = prefixMatches[0];
+      }
+    }
+
+    if (!match) {
+      return { success: false, error: "Invalid or expired match code." };
+    }
+
+    const now = new Date().toISOString();
+
+    // 1. Admin-Curated Match handling
+    if (match.is_admin_match) {
+      // Check if both player slots are already filled
+      if (match.player1_id && match.player2_id) {
+        // If the user is one of the players, redirect directly
+        if (match.player1_id === userId || match.player2_id === userId) {
+          return { success: true, matchId: match.id, redirectUrl: `/live/${match.id}` };
+        }
+        // Match is full, redirect as viewer/predictor
+        return {
+          success: true,
+          matchId: match.id,
+          redirectUrl: `/live/${match.id}`,
+        };
+      }
+
+      // Check if calling user is already player1
+      if (match.player1_id === userId) {
+        return { success: true, matchId: match.id, redirectUrl: `/live/${match.id}` };
+      }
+
+      // Assign user to available slot
+      let newP1 = match.player1_id;
+      let newP2 = match.player2_id;
+
+      if (!newP1) {
+        newP1 = userId;
+      } else if (!newP2) {
+        newP2 = userId;
+      }
+
+      const bothFilled = Boolean(newP1 && newP2);
+      const newState = bothFilled ? "OPEN" : "AWAITING_PLAYERS";
+
+      // Update match
+      const { error: updateError } = await supabase
+        .from("matches")
+        .update({
+          player1_id: newP1,
+          player2_id: newP2,
+          state: newState,
+          updated_at: now,
+        })
+        .eq("id", match.id);
+
+      if (updateError) {
+        return { success: false, error: "Failed to join match. Please try again." };
+      }
+
+      // Insert participant entry
+      await supabase.from("match_participants").upsert({
+        id: `${match.id}_${userId}`,
+        match_id: match.id,
+        user_id: userId,
+        role: "PLAYER",
+        joined_at: now,
+      });
+
+      // If both slots are now filled, update market question with real gamertags and broadcast
+      if (bothFilled) {
+        try {
+          const { data: players } = await supabase
+            .from("player_profiles")
+            .select("id, gamertag, username")
+            .in("id", [newP1!, newP2!]);
+
+          const p1 = players?.find((p) => p.id === newP1);
+          const p2 = players?.find((p) => p.id === newP2);
+          const p1Gamertag = p1?.gamertag || p1?.username || "Player 1";
+          const p2Gamertag = p2?.gamertag || p2?.username || "Player 2";
+
+          const dynamicQuestion = `Will ${p1Gamertag} defeat ${p2Gamertag}?`;
+
+          await supabase
+            .from("matches")
+            .update({ question: dynamicQuestion })
+            .eq("id", match.id);
+
+          await supabase
+            .from("markets")
+            .update({ question: dynamicQuestion, status: "OPEN" })
+            .eq("id", match.id);
+
+          await supabase.from("notifications").insert({
+            type: "ADMIN_MATCH_LIVE",
+            title: "⚡ Match Ready for Predictions!",
+            message: `${p1Gamertag} vs ${p2Gamertag} is now filled and live!`,
+            reference_id: match.id,
+            is_read: false,
+            created_at: now,
+          });
+        } catch (e) {
+          console.warn("Post-fill announcement note:", e);
+        }
+      }
+
+      return { success: true, matchId: match.id, redirectUrl: `/live/${match.id}` };
+    }
+
+    // 2. Standard Peer-to-Peer Match handling
+    if (match.state === "OPEN" && !match.player2_id && match.creator_id !== userId) {
+      // Check wallet balance (unless admin)
+      const stake = match.stake_amount || match.stake || 0;
+      if (!isAdmin && stake > 0) {
+        const { data: wallet } = await supabase
+          .from("virtual_wallets")
+          .select("balance")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (!wallet || (wallet.balance ?? 0) < stake) {
+          return {
+            success: false,
+            error: "Insufficient virtual points for the match entry fee.",
+          };
+        }
+      }
+
+      // Join standard match
+      await supabase
+        .from("matches")
+        .update({
+          player2_id: userId,
+          state: "PLAYER_JOINED",
+          updated_at: now,
+        })
+        .eq("id", match.id);
+
+      await supabase.from("match_participants").upsert({
+        id: `${match.id}_${userId}`,
+        match_id: match.id,
+        user_id: userId,
+        role: "JOINER",
+        joined_at: now,
+      });
+
+      return { success: true, matchId: match.id, redirectUrl: `/matches/${match.id}` };
+    }
+
+    // If already joined or match in progress, redirect to lobby
+    return {
+      success: true,
+      matchId: match.id,
+      redirectUrl: `/matches/${match.id}`,
+    };
+  } catch (err: any) {
+    console.error("joinAdminMatchByCodeAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred while processing match code.",
+    };
+  }
+}
+
+export const loadMatchByCodeAction = joinAdminMatchByCodeAction;
 
 
 

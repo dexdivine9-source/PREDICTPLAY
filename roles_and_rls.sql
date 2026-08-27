@@ -236,11 +236,14 @@ CREATE TRIGGER enforce_role_change_admin_only
 -- 6. ADMIN-CURATED MATCHES & YES/NO MARKETS & NOTIFICATIONS
 -- =========================================================================
 
--- 6a. Add is_admin_match, scheduled_start_time, and question to matches
+-- 6a. Add is_admin_match, scheduled_start_time, question, and match_code to matches
 ALTER TABLE public.matches
   ADD COLUMN IF NOT EXISTS is_admin_match BOOLEAN DEFAULT false,
   ADD COLUMN IF NOT EXISTS scheduled_start_time TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS question TEXT;
+  ADD COLUMN IF NOT EXISTS question TEXT,
+  ADD COLUMN IF NOT EXISTS match_code TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_matches_match_code ON public.matches (match_code);
 
 -- 6b. Add market_type, question, yes_pool, no_pool to markets
 ALTER TABLE public.markets
