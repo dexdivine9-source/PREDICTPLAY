@@ -1,3 +1,17 @@
+/**
+ * ============================================================================
+ * PREDICTPLAY AUTH & ACCOUNT MODEL
+ * ============================================================================
+ * Admin accounts are manually flagged via direct DB update (is_admin / role
+ * column on player_profiles) and are intended for developer/testing use — they
+ * retain full gameplay ability (match creation, predictions, verification)
+ * alongside moderation privileges and testing bypasses.
+ *
+ * Regular player accounts go through normal signup, verification, and balance
+ * rules with no admin capabilities.
+ * ============================================================================
+ */
+
 import { createClient } from "@/lib/supabase/server";
 
 export async function getAuthUser() {

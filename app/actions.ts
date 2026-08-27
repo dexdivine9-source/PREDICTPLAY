@@ -3,47 +3,85 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAuthUser } from "@/lib/auth-server";
 
-export async function createWalletAction() {
-  const user = await getAuthUser();
-  const userId = user.uid;
-
-  const supabase = await createClient();
-  const { data: existing } = await supabase
-    .from("virtual_wallets")
-    .select("user_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (existing) {
-    return;
-  }
-
-  // Create wallet with 1000-point signup bonus (fires once per user)
-  await supabase.from("virtual_wallets").insert({
-    user_id: userId,
-    balance: 1000,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-
-  // Log the SIGNUP_BONUS in transactions and stamp the idempotency flag.
-  // Non-fatal: a logging failure must not break account creation.
+export async function ensureUserAccountAction(): Promise<{ success: boolean; error?: string }> {
   try {
-    await supabase.from("transactions").insert({
-      user_id: userId,
-      amount: 1000,
-      type: "SIGNUP_BONUS",
-      reference_id: userId,
-      created_at: new Date().toISOString(),
-    });
+    const user = await getAuthUser();
+    if (!user || !user.uid) {
+      return { success: false, error: "Not authenticated" };
+    }
 
-    await supabase
+    const userId = user.uid;
+    const supabase = await createClient();
+    const now = new Date().toISOString();
+
+    // 1. Ensure player_profiles exists
+    const { data: profile } = await supabase
       .from("player_profiles")
-      .update({ signup_bonus_granted: true, updated_at: new Date().toISOString() })
-      .eq("id", userId);
-  } catch (err) {
-    console.error("SIGNUP_BONUS log/flag failed (non-fatal):", err);
+      .select("id, signup_bonus_granted")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!profile) {
+      const emailPrefix = user.email ? user.email.split("@")[0].slice(0, 20) : `Player_${userId.slice(0, 5)}`;
+      const displayName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
+
+      await supabase.from("player_profiles").insert({
+        id: userId,
+        user_id: userId,
+        username: displayName.slice(0, 20),
+        gamertag: displayName.slice(0, 20),
+        game: "DLS",
+        is_verified: false,
+        reputation: 100,
+        trust_score: 100,
+        signup_bonus_granted: true,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    // 2. Ensure virtual_wallets exists with 1000 PTS signup bonus
+    const { data: wallet } = await supabase
+      .from("virtual_wallets")
+      .select("user_id, balance")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!wallet) {
+      await supabase.from("virtual_wallets").insert({
+        user_id: userId,
+        balance: 1000,
+        created_at: now,
+        updated_at: now,
+      });
+
+      try {
+        await supabase.from("transactions").insert({
+          user_id: userId,
+          amount: 1000,
+          type: "SIGNUP_BONUS",
+          reference_id: userId,
+          created_at: now,
+        });
+
+        await supabase
+          .from("player_profiles")
+          .update({ signup_bonus_granted: true, updated_at: now })
+          .eq("id", userId);
+      } catch (logErr) {
+        console.warn("SIGNUP_BONUS transaction log warning:", logErr);
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("ensureUserAccountAction error:", err);
+    return { success: false, error: err?.message || "Failed to initialize account" };
   }
+}
+
+export async function createWalletAction() {
+  return await ensureUserAccountAction();
 }
 
 export async function createMatchAction(data: {
@@ -199,7 +237,7 @@ export async function createMarketAction(matchId: string) {
 
 export async function placePredictionAction(
   matchId: string,
-  outcome: "p1" | "p2" | "draw",
+  outcome: "p1" | "p2" | "draw" | "yes" | "no",
   amount: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
@@ -237,11 +275,11 @@ export async function placePredictionAction(
     if (!isAdmin) {
       const { data: matchDoc } = await supabase
         .from("matches")
-        .select("creator_id, player1_id, player2_id")
+        .select("creator_id, player1_id, player2_id, is_admin_match")
         .eq("id", matchId)
         .maybeSingle();
 
-      if (matchDoc) {
+      if (matchDoc && !matchDoc.is_admin_match) {
         if (
           matchDoc.creator_id === userId ||
           matchDoc.player1_id === userId ||
@@ -281,6 +319,14 @@ export async function placePredictionAction(
       return { success: false, error: "Market is not open." };
     }
 
+    const isYesNo = market.market_type === "YES_NO";
+    if (isYesNo && outcome !== "yes" && outcome !== "no") {
+      return { success: false, error: "This curated market only accepts 'yes' or 'no' predictions." };
+    }
+    if (!isYesNo && outcome !== "p1" && outcome !== "p2" && outcome !== "draw") {
+      return { success: false, error: "This match market accepts 'p1', 'p2', or 'draw' predictions." };
+    }
+
     // Deduct from wallet for non-admin accounts
     // ADMIN/DEV BYPASS — admins have unlimited points, balance checks and wallet deductions do not apply to admin accounts.
     if (!isAdmin && nonAdminWallet) {
@@ -291,14 +337,20 @@ export async function placePredictionAction(
         .eq("user_id", userId);
     }
 
-    // Update market pools
+    // Update market pools based on market type
     const poolUpdates: any = {
       total_pool: (market.total_pool || 0) + amount,
       updated_at: new Date().toISOString(),
     };
-    if (outcome === "p1") poolUpdates.p1_pool = (market.p1_pool || 0) + amount;
-    if (outcome === "p2") poolUpdates.p2_pool = (market.p2_pool || 0) + amount;
-    if (outcome === "draw") poolUpdates.draw_pool = (market.draw_pool || 0) + amount;
+
+    if (isYesNo) {
+      if (outcome === "yes") poolUpdates.yes_pool = (market.yes_pool || 0) + amount;
+      if (outcome === "no") poolUpdates.no_pool = (market.no_pool || 0) + amount;
+    } else {
+      if (outcome === "p1") poolUpdates.p1_pool = (market.p1_pool || 0) + amount;
+      if (outcome === "p2") poolUpdates.p2_pool = (market.p2_pool || 0) + amount;
+      if (outcome === "draw") poolUpdates.draw_pool = (market.draw_pool || 0) + amount;
+    }
 
     await supabase.from("markets").update(poolUpdates).eq("id", matchId);
 
@@ -413,13 +465,22 @@ export async function settleMarket(matchId: string, winningOutcome: string) {
 
   if (!marketData || marketData.status === "SETTLED") return;
 
-  const winningPool =
-    winningOutcome === "p1"
-      ? marketData.p1_pool
-      : winningOutcome === "p2"
-      ? marketData.p2_pool
-      : marketData.draw_pool;
-  const nonWinningPool = (marketData.total_pool || 0) - (winningPool || 0);
+  const isYesNo = marketData.market_type === "YES_NO";
+  const normalizedOutcome = winningOutcome.toLowerCase();
+
+  let winningPool = 0;
+  if (isYesNo) {
+    winningPool = normalizedOutcome === "yes" ? (marketData.yes_pool || 0) : (marketData.no_pool || 0);
+  } else {
+    winningPool =
+      winningOutcome === "p1"
+        ? (marketData.p1_pool || 0)
+        : winningOutcome === "p2"
+        ? (marketData.p2_pool || 0)
+        : (marketData.draw_pool || 0);
+  }
+
+  const nonWinningPool = (marketData.total_pool || 0) - winningPool;
 
   const { data: predictions } = await supabase
     .from("predictions")
@@ -428,7 +489,11 @@ export async function settleMarket(matchId: string, winningOutcome: string) {
 
   if (predictions) {
     for (const pred of predictions) {
-      if (pred.outcome === winningOutcome) {
+      const isWinner = isYesNo
+        ? pred.outcome.toLowerCase() === normalizedOutcome
+        : pred.outcome === winningOutcome;
+
+      if (isWinner) {
         let payout = pred.amount;
         if (winningPool > 0) {
           const share = pred.amount / winningPool;
@@ -492,3 +557,4 @@ export async function settleMarket(matchId: string, winningOutcome: string) {
     })
     .eq("id", matchId);
 }
+

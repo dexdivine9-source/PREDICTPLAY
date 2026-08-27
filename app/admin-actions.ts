@@ -450,4 +450,136 @@ export async function updateUserRoleAction(
   return { success: true, targetUserId, newRole };
 }
 
+export async function createAdminMatchAction(data: {
+  player1Id: string;
+  player2Id: string;
+  game?: string;
+  scheduledStartTime?: string;
+  question?: string;
+}): Promise<{ success: boolean; matchId?: string; error?: string }> {
+  try {
+    const user = await getAuthUser();
+    if (!user.admin) {
+      return { success: false, error: "Unauthorized: Admin role required." };
+    }
+
+    const { player1Id, player2Id, scheduledStartTime } = data;
+    const game = (data.game || "DLS").toUpperCase();
+
+    if (!player1Id || !player2Id) {
+      return { success: false, error: "Both Player 1 and Player 2 must be selected." };
+    }
+
+    if (player1Id === player2Id) {
+      return { success: false, error: "Player 1 and Player 2 must be different players." };
+    }
+
+    const supabase = await createClient();
+    const now = new Date().toISOString();
+
+    // Fetch both player profiles
+    const { data: players, error: playersError } = await supabase
+      .from("player_profiles")
+      .select("id, username, gamertag")
+      .in("id", [player1Id, player2Id]);
+
+    if (playersError || !players || players.length < 2) {
+      return { success: false, error: "Could not find profile details for both selected players." };
+    }
+
+    const p1 = players.find((p) => p.id === player1Id);
+    const p2 = players.find((p) => p.id === player2Id);
+
+    const p1Name = p1?.gamertag || p1?.username || "Player 1";
+    const p2Name = p2?.gamertag || p2?.username || "Player 2";
+
+    const defaultQuestion = `Will ${p1Name} defeat ${p2Name}?`;
+    const finalQuestion = data.question?.trim() || defaultQuestion;
+
+    // 1. Insert into matches table
+    const { data: match, error: matchError } = await supabase
+      .from("matches")
+      .insert({
+        creator_id: user.uid,
+        player1_id: player1Id,
+        player2_id: player2Id,
+        game,
+        stake_amount: 0, // No entry fee for curated matches
+        state: "OPEN",
+        is_admin_match: true,
+        scheduled_start_time: scheduledStartTime ? new Date(scheduledStartTime).toISOString() : null,
+        question: finalQuestion,
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+
+    if (matchError || !match) {
+      console.error("Failed to insert admin match:", matchError);
+      return {
+        success: false,
+        error: matchError?.message || "Failed to create match in database.",
+      };
+    }
+
+    // 2. Insert into markets table with YES/NO market_type
+    const { error: marketError } = await supabase.from("markets").upsert({
+      id: match.id,
+      match_id: match.id,
+      market_type: "YES_NO",
+      question: finalQuestion,
+      total_pool: 0,
+      yes_pool: 0,
+      no_pool: 0,
+      p1_pool: 0,
+      p2_pool: 0,
+      draw_pool: 0,
+      status: "OPEN",
+      created_at: now,
+      updated_at: now,
+    });
+
+    if (marketError) {
+      console.warn("Market insert warning:", marketError);
+    }
+
+    // 3. Broadcast notification announcement
+    try {
+      await supabase.from("notifications").insert({
+        type: "ADMIN_MATCH_LIVE",
+        title: "⚡ New Live Curated Match!",
+        message: `${p1Name} vs ${p2Name} is live for predictions! Question: "${finalQuestion}"`,
+        reference_id: match.id,
+        is_read: false,
+        created_at: now,
+      });
+    } catch (notifErr) {
+      console.warn("Notification broadcast note:", notifErr);
+    }
+
+    // 4. Record audit log in admin_actions
+    try {
+      await supabase.from("admin_actions").insert({
+        admin_id: user.uid,
+        match_id: match.id,
+        action: "ADMIN_MATCH_CREATED",
+        reason: `Admin created curated match: ${p1Name} vs ${p2Name} (${game}) with YES/NO market.`,
+        created_at: now,
+      });
+    } catch {
+      // Non-fatal audit log
+    }
+
+    return { success: true, matchId: match.id };
+  } catch (err: any) {
+    console.error("createAdminMatchAction unexpected error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred while creating the curated match.",
+    };
+  }
+}
+
+
 
