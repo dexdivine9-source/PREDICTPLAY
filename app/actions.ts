@@ -99,15 +99,18 @@ export async function createMatchAction(data: {
     }
   }
 
-  // Check wallet balance
-  const { data: wallet } = await supabase
-    .from("virtual_wallets")
-    .select("balance")
-    .eq("user_id", userId)
-    .maybeSingle();
+  // 3. Balance Check
+  // ADMIN/DEV BYPASS — admins have unlimited points, balance checks and wallet deductions do not apply to admin accounts.
+  if (!isAdmin) {
+    const { data: wallet } = await supabase
+      .from("virtual_wallets")
+      .select("balance")
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  if (!wallet || (wallet.balance ?? 0) < stakeAmount) {
-    throw new Error("Insufficient virtual points for the entry fee.");
+    if (!wallet || (wallet.balance ?? 0) < stakeAmount) {
+      throw new Error("Insufficient virtual points for the entry fee.");
+    }
   }
 
   // Create match row
@@ -233,14 +236,20 @@ export async function placePredictionAction(
     }
   }
 
-  const { data: wallet } = await supabase
-    .from("virtual_wallets")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
+  // 3. Balance Check
+  // ADMIN/DEV BYPASS — admins have unlimited points, balance checks and wallet deductions do not apply to admin accounts.
+  let nonAdminWallet: any = null;
+  if (!isAdmin) {
+    const { data: wallet } = await supabase
+      .from("virtual_wallets")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  if (!wallet || (wallet.balance ?? 0) < amount) {
-    throw new Error("Insufficient virtual points.");
+    if (!wallet || (wallet.balance ?? 0) < amount) {
+      throw new Error("Insufficient virtual points.");
+    }
+    nonAdminWallet = wallet;
   }
 
   const { data: market } = await supabase
@@ -253,12 +262,15 @@ export async function placePredictionAction(
     throw new Error("Market is not open.");
   }
 
-  // Deduct from wallet
-  const newBalance = wallet.balance - amount;
-  await supabase
-    .from("virtual_wallets")
-    .update({ balance: newBalance, updated_at: new Date().toISOString() })
-    .eq("user_id", userId);
+  // Deduct from wallet for non-admin accounts
+  // ADMIN/DEV BYPASS — admins have unlimited points, balance checks and wallet deductions do not apply to admin accounts.
+  if (!isAdmin && nonAdminWallet) {
+    const newBalance = nonAdminWallet.balance - amount;
+    await supabase
+      .from("virtual_wallets")
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq("user_id", userId);
+  }
 
   // Update market pools
   const poolUpdates: any = {
