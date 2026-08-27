@@ -3,27 +3,47 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Trophy, Gamepad2, User, Bell, Menu, X, PlaySquare, LogOut } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { useAuth } from "@/components/AuthProvider";
 import AuthModal from "@/components/AuthModal";
 import VerificationBanner from "@/components/VerificationBanner";
+import { supabase } from "@/lib/supabase";
 
 export default function Navigation() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [hasLiveAdminMatch, setHasLiveAdminMatch] = useState(false);
   const { user, profile, wallet, signOut } = useAuth();
   
+  useEffect(() => {
+    async function checkLiveMatches() {
+      try {
+        const { count } = await supabase
+          .from("matches")
+          .select("id", { count: "exact", head: true })
+          .eq("is_admin_match", true)
+          .in("state", ["OPEN", "IN_PROGRESS", "ADMIN_SCHEDULED"]);
+
+        setHasLiveAdminMatch(Boolean(count && count > 0));
+      } catch {
+        // Non-fatal check
+      }
+    }
+    checkLiveMatches();
+  }, [pathname]);
+
   const isAdmin = Boolean(
-    profile?.is_admin ||
+    profile?.role === "admin" ||
+    profile?.is_admin === true ||
     user?.user_metadata?.role === "admin" ||
     user?.app_metadata?.role === "admin"
   );
 
   const desktopLinks = [
     { href: "/matches", label: "Matches", icon: Gamepad2 },
-    { href: "/markets", label: "Markets", icon: PlaySquare },
+    { href: "/markets", label: "Markets", icon: PlaySquare, hasLive: hasLiveAdminMatch },
     { href: "/rankings", label: "Rankings", icon: Trophy },
     { href: "/profile", label: "Players", icon: User },
   ];
@@ -31,14 +51,17 @@ export default function Navigation() {
   const mobileLinks = [
     { href: "/", label: "Home", icon: Home },
     { href: "/matches", label: "Matches", icon: Gamepad2 },
-    { href: "/markets", label: "Markets", icon: PlaySquare },
+    { href: "/markets", label: "Markets", icon: PlaySquare, hasLive: hasLiveAdminMatch },
     { href: "/rankings", label: "Rankings", icon: Trophy },
     { href: user ? "/profile" : "/login", label: user ? "Profile" : "Login", icon: User },
   ];
 
   return (
     <>
-      <nav className="sticky top-0 z-50 w-full border-b border-pp-border bg-pp-bg/90 backdrop-blur">
+      <nav className={clsx(
+        "sticky top-0 z-50 w-full border-b bg-pp-bg/90 backdrop-blur transition-colors",
+        isAdmin ? "border-amber-500/30" : "border-pp-border"
+      )}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
@@ -58,14 +81,20 @@ export default function Navigation() {
                       key={link.href}
                       href={link.href}
                       className={clsx(
-                        "px-3 py-2 rounded-md text-sm font-bold transition-colors flex items-center gap-2 uppercase tracking-wide",
+                        "px-3 py-2 rounded-md text-sm font-bold transition-colors flex items-center gap-2 uppercase tracking-wide relative",
                         isActive
                           ? "bg-pp-surface text-pp-primary"
                           : "text-pp-text-muted hover:bg-pp-surface hover:text-white"
                       )}
                     >
                       <Icon size={16} />
-                      {link.label}
+                      <span>{link.label}</span>
+                      {link.hasLive && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-red-500 text-white text-[9px] font-black tracking-widest uppercase flex items-center gap-1 shadow-[0_0_6px_rgba(239,68,68,0.6)]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                          LIVE
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -76,8 +105,9 @@ export default function Navigation() {
               {isAdmin && (
                 <Link
                   href="/admin/verifications"
-                  className="px-3 py-1.5 rounded-md bg-pp-surface border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 font-bold text-xs uppercase tracking-wider transition-colors"
+                  className="px-3 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/40 text-amber-400 hover:bg-amber-500/20 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
                 >
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                   Admin Panel
                 </Link>
               )}
@@ -89,16 +119,28 @@ export default function Navigation() {
               </button>
               
               {user ? (
-                <div className="flex items-center gap-4 pl-2 border-l border-pp-border">
+                <div className="flex items-center gap-3 pl-2 border-l border-pp-border">
                   <div className="flex items-center gap-2 bg-pp-primary/10 border border-pp-primary/30 px-3 py-1.5 rounded-full">
                     <span className="text-xs font-bold text-pp-primary uppercase">PTS</span>
                     <span className="text-sm font-black font-mono text-white">{wallet?.balance ?? 0}</span>
                   </div>
                   <Link href="/profile" className="flex items-center gap-2 text-sm font-medium hover:text-white transition-colors">
-                    <div className="w-8 h-8 rounded-full overflow-hidden border border-pp-border bg-pp-surface flex items-center justify-center text-xs font-bold text-pp-text-muted">
+                    <div className={clsx(
+                      "w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-xs font-bold transition-all",
+                      isAdmin 
+                        ? "border-2 border-amber-400 bg-amber-500/10 text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.3)]" 
+                        : "border border-pp-border bg-pp-surface text-pp-text-muted"
+                    )}>
                       {user.email?.slice(0, 2).toUpperCase()}
                     </div>
-                    {user.email?.split('@')[0]}
+                    <div className="flex items-center gap-1.5">
+                      <span>{user.email?.split('@')[0]}</span>
+                      {isAdmin && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/50 rounded shadow-sm">
+                          ADMIN
+                        </span>
+                      )}
+                    </div>
                   </Link>
                   <button onClick={() => signOut()} className="text-pp-text-muted hover:text-red-500 transition-colors">
                     <LogOut size={18} />
@@ -111,7 +153,12 @@ export default function Navigation() {
               )}
             </div>
 
-            <div className="md:hidden flex items-center">
+            <div className="md:hidden flex items-center gap-2">
+              {isAdmin && (
+                <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-full">
+                  ADMIN
+                </span>
+              )}
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="text-pp-text-muted hover:text-white p-2"
@@ -127,8 +174,15 @@ export default function Navigation() {
           <div className="md:hidden bg-pp-surface border-b border-pp-border">
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
               {user && (
-                <div className="flex justify-between items-center mb-4 px-3 py-2 bg-pp-bg rounded-md border border-pp-primary/20">
-                  <span className="text-xs font-bold text-pp-text-muted uppercase">Balance</span>
+                <div className="flex justify-between items-center mb-4 px-3 py-2.5 bg-pp-bg rounded-md border border-pp-primary/20">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white">{user.email?.split('@')[0]}</span>
+                    {isAdmin && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded">
+                        ADMIN
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-pp-primary uppercase">PTS</span>
                     <span className="text-sm font-black font-mono text-white">{wallet?.balance ?? 0}</span>

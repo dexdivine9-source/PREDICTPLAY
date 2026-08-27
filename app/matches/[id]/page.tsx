@@ -24,7 +24,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [verifyModalAction, setVerifyModalAction] = useState("participate in this match");
   
-  const [predictOutcome, setPredictOutcome] = useState<"p1" | "p2" | "draw">("p1");
+  const [predictOutcome, setPredictOutcome] = useState<"p1" | "p2" | "draw" | "yes" | "no">("p1");
   const [predictAmount, setPredictAmount] = useState<string>("100");
   const [predictLoading, setPredictLoading] = useState(false);
 
@@ -320,45 +320,101 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 mb-8">
-                <div className="bg-pp-bg p-4 rounded-lg text-center border border-pp-border">
-                  <span className="block text-[10px] text-pp-text-muted font-bold uppercase mb-1">Total Pool</span>
-                  <span className="text-xl font-black font-mono text-white">{market.totalPool} PTS</span>
+              {market.market_type === "YES_NO" ? (
+                <div className="space-y-4 mb-8">
+                  <div className="p-4 bg-pp-bg rounded-xl border border-pp-border text-center">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block mb-1">
+                      Curated Market Question
+                    </span>
+                    <p className="text-base font-bold text-white">"{market.question || match.question || "Will Player 1 defeat Player 2?"}"</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-pp-bg p-4 rounded-lg text-center border border-green-500/30">
+                      <span className="block text-[10px] text-green-400 font-bold uppercase mb-1">YES Pool</span>
+                      <span className="text-xl font-black font-mono text-white">
+                        {market.totalPool ? Math.round(((market.yes_pool || 0) / market.totalPool) * 100) : 50}% ({market.yes_pool || 0} PTS)
+                      </span>
+                    </div>
+                    <div className="bg-pp-bg p-4 rounded-lg text-center border border-red-500/30">
+                      <span className="block text-[10px] text-red-400 font-bold uppercase mb-1">NO Pool</span>
+                      <span className="text-xl font-black font-mono text-white">
+                        {market.totalPool ? Math.round(((market.no_pool || 0) / market.totalPool) * 100) : 50}% ({market.no_pool || 0} PTS)
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-pp-bg p-4 rounded-lg text-center border border-pp-border">
-                  <span className="block text-[10px] text-pp-text-muted font-bold uppercase mb-1">Creator Win (P1)</span>
-                  <span className="text-xl font-black font-mono text-white">
-                    {market.totalPool ? Math.round((market.p1Pool / market.totalPool) * 100) : 0}%
-                  </span>
+              ) : (
+                <div className="grid grid-cols-3 gap-4 mb-8">
+                  <div className="bg-pp-bg p-4 rounded-lg text-center border border-pp-border">
+                    <span className="block text-[10px] text-pp-text-muted font-bold uppercase mb-1">Total Pool</span>
+                    <span className="text-xl font-black font-mono text-white">{market.totalPool} PTS</span>
+                  </div>
+                  <div className="bg-pp-bg p-4 rounded-lg text-center border border-pp-border">
+                    <span className="block text-[10px] text-pp-text-muted font-bold uppercase mb-1">Creator Win (P1)</span>
+                    <span className="text-xl font-black font-mono text-white">
+                      {market.totalPool ? Math.round((market.p1Pool / market.totalPool) * 100) : 0}%
+                    </span>
+                  </div>
+                  <div className="bg-pp-bg p-4 rounded-lg text-center border border-pp-border">
+                    <span className="block text-[10px] text-pp-text-muted font-bold uppercase mb-1">Challenger Win (P2)</span>
+                    <span className="text-xl font-black font-mono text-white">
+                      {market.totalPool ? Math.round((market.p2Pool / market.totalPool) * 100) : 0}%
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-pp-bg p-4 rounded-lg text-center border border-pp-border">
-                  <span className="block text-[10px] text-pp-text-muted font-bold uppercase mb-1">Challenger Win (P2)</span>
-                  <span className="text-xl font-black font-mono text-white">
-                    {market.totalPool ? Math.round((market.p2Pool / market.totalPool) * 100) : 0}%
-                  </span>
-                </div>
-              </div>
+              )}
 
               {market.status === "OPEN" && user ? (
                 <form onSubmit={handlePredict} className="space-y-6">
                   <div>
-                    <label className="block text-sm font-bold text-pp-text-muted mb-3 uppercase tracking-wide">Who will win?</label>
-                    <div className="grid grid-cols-3 gap-4">
-                      {["p1", "draw", "p2"].map((outcome) => (
+                    <label className="block text-sm font-bold text-pp-text-muted mb-3 uppercase tracking-wide">
+                      {market.market_type === "YES_NO" ? "Your Prediction" : "Who will win?"}
+                    </label>
+
+                    {market.market_type === "YES_NO" ? (
+                      <div className="grid grid-cols-2 gap-4">
                         <button
-                          key={outcome}
                           type="button"
-                          onClick={() => setPredictOutcome(outcome as any)}
-                          className={`py-3 rounded-lg font-bold text-sm uppercase transition-colors border ${
-                            predictOutcome === outcome 
-                              ? "bg-pp-primary/20 border-pp-primary text-pp-primary" 
+                          onClick={() => setPredictOutcome("yes")}
+                          className={`py-4 rounded-lg font-black text-base uppercase transition-all border ${
+                            predictOutcome === "yes"
+                              ? "bg-green-500/20 border-green-500 text-green-400 shadow-md shadow-green-500/20"
                               : "bg-pp-bg border-pp-border text-white hover:border-white/50"
                           }`}
                         >
-                          {outcome === "p1" ? "Creator" : outcome === "p2" ? "Challenger" : "Draw"}
+                          YES
                         </button>
-                      ))}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => setPredictOutcome("no")}
+                          className={`py-4 rounded-lg font-black text-base uppercase transition-all border ${
+                            predictOutcome === "no"
+                              ? "bg-red-500/20 border-red-500 text-red-400 shadow-md shadow-red-500/20"
+                              : "bg-pp-bg border-pp-border text-white hover:border-white/50"
+                          }`}
+                        >
+                          NO
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-4">
+                        {["p1", "draw", "p2"].map((outcome) => (
+                          <button
+                            key={outcome}
+                            type="button"
+                            onClick={() => setPredictOutcome(outcome as any)}
+                            className={`py-3 rounded-lg font-bold text-sm uppercase transition-colors border ${
+                              predictOutcome === outcome 
+                                ? "bg-pp-primary/20 border-pp-primary text-pp-primary" 
+                                : "bg-pp-bg border-pp-border text-white hover:border-white/50"
+                            }`}
+                          >
+                            {outcome === "p1" ? "Creator" : outcome === "p2" ? "Challenger" : "Draw"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>

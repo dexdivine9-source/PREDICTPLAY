@@ -17,7 +17,8 @@ import {
   Check, 
   X,
   FileCheck2,
-  Clock
+  Clock,
+  Swords
 } from "lucide-react";
 import { 
   checkIsAdminAction, 
@@ -144,17 +145,24 @@ export default function AdminUsersPage() {
       </div>
 
       {/* Admin Sub-navigation Tabs */}
-      <div className="flex items-center gap-3 mb-8 border-b border-pp-border pb-4">
+      <div className="flex items-center gap-3 mb-8 border-b border-pp-border pb-4 overflow-x-auto">
+        <Link
+          href="/admin/matches/create"
+          className="px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider text-pp-text-muted hover:text-white hover:bg-pp-surface transition-all flex items-center gap-2 border border-transparent flex-shrink-0"
+        >
+          <Swords size={16} />
+          <span>Curate Live Match</span>
+        </Link>
         <Link
           href="/admin/verifications"
-          className="px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider text-pp-text-muted hover:text-white hover:bg-pp-surface transition-all flex items-center gap-2 border border-transparent"
+          className="px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider text-pp-text-muted hover:text-white hover:bg-pp-surface transition-all flex items-center gap-2 border border-transparent flex-shrink-0"
         >
           <FileCheck2 size={16} />
           <span>Player Verifications</span>
         </Link>
         <Link
           href="/admin/users"
-          className="px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider bg-pp-primary text-black transition-all flex items-center gap-2 shadow-md shadow-pp-primary/20"
+          className="px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider bg-pp-primary text-black transition-all flex items-center gap-2 shadow-md shadow-pp-primary/20 flex-shrink-0"
         >
           <Shield size={16} />
           <span>Manage Admins</span>
