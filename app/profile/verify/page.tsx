@@ -26,7 +26,7 @@ import {
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
-import { saveVerificationAction, linkDlsTrackerAction } from "@/app/profile-actions";
+import { saveVerificationAction } from "@/app/profile-actions";
 
 export default function ProfileVerifyPage() {
   const router = useRouter();
@@ -38,11 +38,13 @@ export default function ProfileVerifyPage() {
   const [team, setTeam] = useState("");
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
-  
+  const [teamScreenshotFile, setTeamScreenshotFile] = useState<File | null>(null);
+  const [teamScreenshotUrl, setTeamScreenshotUrl] = useState("");
+
   // UI states
   const [uploadingScreenshot, setUploadingScreenshot] = useState(false);
+  const [uploadingTeamScreenshot, setUploadingTeamScreenshot] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [trackerLoading, setTrackerLoading] = useState(false);
   const [trackerMessage, setTrackerMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [isEditingVerified, setIsEditingVerified] = useState(false);
@@ -62,6 +64,9 @@ export default function ProfileVerifyPage() {
       }
       if (profile.game_profile_screenshot_url) {
         setScreenshotUrl(profile.game_profile_screenshot_url);
+      }
+      if ((profile as any).team_screenshot_url) {
+        setTeamScreenshotUrl((profile as any).team_screenshot_url);
       }
     }
   }, [profile]);
@@ -114,38 +119,50 @@ export default function ProfileVerifyPage() {
     }
   };
 
-  const handleTrackerLookup = async () => {
-    if (!trackerId.trim() || trackerLoading) return;
-    setTrackerLoading(true);
-    setTrackerMessage(null);
+  const handleTeamScreenshotUpload = async (file: File): Promise<string> => {
+    if (!user) throw new Error("Please log in first.");
 
-    try {
-      const res = await linkDlsTrackerAction(trackerId.trim());
-      if (res.success && res.profile) {
-        setTrackerMessage({
-          type: "success",
-          text: `Found team: "${res.profile.teamName}" (Div ${res.profile.division || 1}, ${res.profile.winRate}% win rate)`,
-        });
-        if (!team.trim() && res.profile.teamName) {
-          setTeam(res.profile.teamName);
-        }
-        if (!gameUsername.trim() && res.profile.teamName) {
-          setGameUsername(res.profile.teamName.slice(0, 20));
-        }
-      } else {
-        setTrackerMessage({
-          type: "error",
-          text: res.error || "Tracker linked as custom ID. You can enter your team manually.",
-        });
-      }
-    } catch {
-      setTrackerMessage({
-        type: "error",
-        text: "Could not auto-fetch tracker details. You can enter your team name manually.",
-      });
-    } finally {
-      setTrackerLoading(false);
+    if (!file.type.startsWith("image/")) {
+      throw new Error("Only image files (JPEG, PNG, WebP) are allowed.");
     }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Team screenshot must be under 5MB.");
+    }
+
+    setUploadingTeamScreenshot(true);
+    try {
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const storagePath = `verification/${user.id}/team_${Date.now()}_${sanitizedFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("evidence")
+        .upload(storagePath, file, {
+          contentType: file.type,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.warn("Team screenshot upload notice:", uploadError.message);
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("evidence")
+        .getPublicUrl(storagePath);
+
+      const url = publicUrlData?.publicUrl || storagePath;
+      setTeamScreenshotUrl(url);
+      return url;
+    } finally {
+      setUploadingTeamScreenshot(false);
+    }
+  };
+
+  const handleTrackerSave = () => {
+    if (!trackerId.trim()) return;
+    setTrackerMessage({
+      type: "success",
+      text: "Tracker ID saved.",
+    });
   };
 
   const handleSubmit = async (isPartialSave = false) => {
@@ -155,11 +172,18 @@ export default function ProfileVerifyPage() {
 
     try {
       let finalScreenshotUrl = screenshotUrl;
+      let finalTeamScreenshotUrl = teamScreenshotUrl;
 
-      // If a new screenshot file was selected, upload it first
+      // If a new profile screenshot file was selected, upload it first
       if (screenshotFile) {
         finalScreenshotUrl = await handleScreenshotUpload(screenshotFile);
         setScreenshotFile(null);
+      }
+
+      // If a new team screenshot file was selected, upload it first
+      if (teamScreenshotFile) {
+        finalTeamScreenshotUrl = await handleTeamScreenshotUpload(teamScreenshotFile);
+        setTeamScreenshotFile(null);
       }
 
       const res = await saveVerificationAction({
@@ -167,8 +191,9 @@ export default function ProfileVerifyPage() {
         gameProfileScreenshotUrl: finalScreenshotUrl,
         trackerId: trackerId.trim(),
         team: team.trim(),
+        teamScreenshotUrl: finalTeamScreenshotUrl || undefined,
         allowPartial: isPartialSave,
-      });
+      } as any);
 
       await refreshProfile();
       setIsEditingVerified(false);
@@ -327,6 +352,39 @@ export default function ProfileVerifyPage() {
                 <strong className="text-pp-primary font-mono text-sm">100% (Trusted)</strong>
               </div>
             </div>
+
+            {/* Team screenshot preview if available */}
+            {((profile as any)?.team_screenshot_url || teamScreenshotUrl) && (
+              <div className="p-4 bg-pp-bg/80 border border-pp-border rounded-xl flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    onClick={() => setPreviewScreenshotUrl((profile as any)?.team_screenshot_url || teamScreenshotUrl)}
+                    className="w-12 h-10 rounded-lg overflow-hidden bg-black/40 border border-pp-border cursor-pointer relative group flex-shrink-0"
+                  >
+                    <img
+                      src={(profile as any)?.team_screenshot_url || teamScreenshotUrl}
+                      alt="Team screenshot"
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Eye size={14} className="text-white" />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-white block">Verified Team Screenshot</span>
+                    <span className="text-[10px] text-green-400 font-medium">✓ On Record</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewScreenshotUrl((profile as any)?.team_screenshot_url || teamScreenshotUrl)}
+                  className="text-xs font-bold text-pp-primary hover:underline flex items-center gap-1"
+                >
+                  <span>View Proof</span>
+                  <ExternalLink size={12} />
+                </button>
+              </div>
+            )}
 
             {/* Screenshot proof preview if available */}
             {(profile?.game_profile_screenshot_url || screenshotUrl) && (
@@ -608,23 +666,16 @@ export default function ProfileVerifyPage() {
                   onChange={(e) => setTrackerId(e.target.value)}
                   required
                   placeholder="tracker.ftgames.com/?idx=... or ID"
-                  disabled={saving || trackerLoading}
+                  disabled={saving}
                   className="flex-1 bg-pp-bg border border-pp-border rounded-xl p-3.5 text-white placeholder:text-pp-text-muted/60 focus:outline-none focus:border-pp-primary transition-colors text-sm font-mono text-xs sm:text-sm"
                 />
                 <button
                   type="button"
-                  onClick={handleTrackerLookup}
-                  disabled={trackerLoading || !trackerId.trim() || saving}
+                  onClick={handleTrackerSave}
+                  disabled={!trackerId.trim() || saving}
                   className="px-4 py-3 bg-pp-primary/10 border border-pp-primary/40 text-pp-primary font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-pp-primary/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 flex-shrink-0"
                 >
-                  {trackerLoading ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>Checking...</span>
-                    </>
-                  ) : (
-                    <span>Fetch / Link</span>
-                  )}
+                  <span>Save</span>
                 </button>
               </div>
 
@@ -642,6 +693,7 @@ export default function ProfileVerifyPage() {
             </div>
 
             {/* Field 4: Team */}
+
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-2">
                 <Users size={15} className="text-pp-primary" />
@@ -660,6 +712,53 @@ export default function ProfileVerifyPage() {
                 disabled={saving}
                 className="w-full bg-pp-bg border border-pp-border rounded-xl p-3.5 text-white placeholder:text-pp-text-muted/60 focus:outline-none focus:border-pp-primary transition-colors text-sm"
               />
+            </div>
+
+            {/* Field 5: Team Screenshot Upload (Optional) */}
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <UploadCloud size={15} className="text-pp-primary" />
+                <span>5. Team Screenshot Upload <span className="text-pp-text-muted font-normal text-[11px] normal-case">(Optional)</span></span>
+              </label>
+              <p className="text-[11px] text-pp-text-muted mb-2">
+                Upload a screenshot showing your team/club page (Max 5MB). This is optional but helps with verification.
+              </p>
+
+              <div className="border-2 border-dashed border-pp-border hover:border-pp-primary/50 rounded-xl p-5 bg-pp-bg/60 transition-all">
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                  <input
+                    type="file"
+                    accept="image/jpeg, image/png, image/webp"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setTeamScreenshotFile(file);
+                    }}
+                    disabled={uploadingTeamScreenshot || saving}
+                    className="w-full text-xs text-pp-text-muted file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-pp-primary file:text-black hover:file:bg-pp-primary-dark cursor-pointer bg-pp-surface rounded-lg border border-pp-border p-2"
+                  />
+                </div>
+
+                {(teamScreenshotFile || teamScreenshotUrl) && (
+                  <div className="mt-3 pt-3 border-t border-pp-border/60 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-green-400 font-medium">
+                      <CheckCircle2 size={14} />
+                      <span>
+                        {teamScreenshotFile ? `Ready to upload: ${teamScreenshotFile.name}` : "Team screenshot attached on record"}
+                      </span>
+                    </div>
+                    {teamScreenshotUrl && !teamScreenshotFile && (
+                      <a
+                        href={teamScreenshotUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-pp-primary hover:underline text-[11px] font-bold"
+                      >
+                        View Image ↗
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Actions */}
