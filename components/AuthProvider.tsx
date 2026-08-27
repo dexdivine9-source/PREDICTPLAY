@@ -30,20 +30,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = async (uid: string) => {
     try {
-      const { data: profileData } = await supabase
+      let { data: profileData } = await supabase
         .from("player_profiles")
         .select("*")
         .eq("id", uid)
         .maybeSingle();
 
-      setProfile(profileData || null);
-
-      const { data: walletData } = await supabase
+      let { data: walletData } = await supabase
         .from("virtual_wallets")
         .select("*")
         .eq("user_id", uid)
         .maybeSingle();
 
+      // If either profile or wallet does not exist, auto-provision and grant 1000 PTS signup bonus
+      if (!profileData || !walletData) {
+        try {
+          const { ensureUserAccountAction } = await import("@/app/actions");
+          await ensureUserAccountAction();
+
+          const { data: pData } = await supabase
+            .from("player_profiles")
+            .select("*")
+            .eq("id", uid)
+            .maybeSingle();
+          profileData = pData;
+
+          const { data: wData } = await supabase
+            .from("virtual_wallets")
+            .select("*")
+            .eq("user_id", uid)
+            .maybeSingle();
+          walletData = wData;
+        } catch (initErr) {
+          console.warn("Account auto-provisioning note:", initErr);
+        }
+      }
+
+      setProfile(profileData || null);
       setWallet(walletData || null);
     } catch (e) {
       console.error("Error fetching Supabase profile:", e);
